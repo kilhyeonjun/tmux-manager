@@ -63,6 +63,7 @@ _tmux_archive_meta() {
 
 # ── UUID group aggregation ──────────────────────────────────────────────────
 _tmux_archive_groups() {
+  setopt local_options nonomatch
   local groups=''
   for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
     [ ! -f "$f" ] && continue
