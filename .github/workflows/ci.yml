@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+      - name: Run ShellCheck
+        run: |
+          shellcheck -x -s bash \
+            init.sh \
+            lib/utils.sh \
+            lib/metrics.sh \
+            lib/core.sh \
+            lib/restore.sh \
+            lib/status.sh \
+            lib/preview.sh \
+            plugins/opencode.sh \
+            hooks/on-session-created.sh \
+            hooks/tmux-hooks.conf \
+            cron/autoarchive.sh \
+            conf/defaults.conf
+
+  bats:
+    name: Bats Tests
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats
+        run: brew install bats-core
+      - name: Run tests
+        run: bats tests/
