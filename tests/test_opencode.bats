@@ -159,3 +159,217 @@ EOF
   [[ "$result" == *"prompt:ok"* ]]
   [[ "$result" == *"enrich:ok"* ]]
 }
+
+@test "oc_capture_session prefers detected SID over title match" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+
+  cat > "$fakebin/tmux" << 'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "list-panes" ]; then
+  echo "%1"
+  exit 0
+fi
+if [ "$1" = "display-message" ] && [ "$2" = "-p" ] && [ "$3" = "-t" ] && [ "$4" = "%1" ]; then
+  case "$5" in
+    '#{window_index}') echo "1" ;;
+    '#{pane_index}') echo "0" ;;
+    '#{pane_title}') echo "OC | Same Title" ;;
+    '#{pane_current_path}') echo "/projects/new" ;;
+    *) echo "" ;;
+  esac
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$fakebin/tmux"
+
+  cat > "$fakebin/opencode" << 'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "session" ] && [ "$2" = "list" ]; then
+  # Same title maps to old sid in list (ambiguous case)
+  echo "ses_old111 Same Title"
+  exit 0
+fi
+if [ "$1" = "export" ] && [ -n "$2" ]; then
+  sid="$2"
+  cat <<JSON
+{"info":{"title":"T-$sid","directory":"/projects/from-export"}}
+JSON
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$fakebin/opencode"
+
+  local out_file="$TMUX_ARCHIVE_DIR/oc_capture_test.archive"
+  local base="$TMUX_ARCHIVE_DIR/oc_capture_test"
+  local pane_file="${base}_w1_p0.pane"
+  cat > "$pane_file" << 'EOF'
+random history
+opencode -s ses_new999
+EOF
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_capture_session 'dummy-session' '$out_file' '$base'
+  "
+  [ "$status" -eq 0 ]
+
+  local line
+  line=$(cat "$out_file")
+  echo "line: $line"
+
+  # Must keep detected/current SID from pane history, not title-matched old SID
+  [[ "$line" == *"|ses_new999|"* ]]
+  [[ "$line" != *"|ses_old111|"* ]]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_detect_sid prefers explicit switch command" {
+  local pane_file="$TMUX_ARCHIVE_DIR/detect_sid_test.pane"
+  cat > "$pane_file" << 'EOF'
+ses_old111 appeared earlier
+some logs...
+opencode -s ses_new222
+EOF
+
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_detect_sid_from_pane '$pane_file'
+  ")
+  echo "result: $result"
+  [ "$result" = "ses_new222" ]
+}
+
+@test "oc_capture_session falls back to title match when no detected SID" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+
+  cat > "$fakebin/tmux" << 'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "list-panes" ]; then
+  echo "%1"
+  exit 0
+fi
+if [ "$1" = "display-message" ] && [ "$2" = "-p" ] && [ "$3" = "-t" ] && [ "$4" = "%1" ]; then
+  case "$5" in
+    '#{window_index}') echo "1" ;;
+    '#{pane_index}') echo "0" ;;
+    '#{pane_title}') echo "OC | TitleMatch" ;;
+    '#{pane_current_path}') echo "/projects/title" ;;
+    *) echo "" ;;
+  esac
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$fakebin/tmux"
+
+  cat > "$fakebin/opencode" << 'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "session" ] && [ "$2" = "list" ]; then
+  echo "ses_title123 TitleMatch"
+  exit 0
+fi
+if [ "$1" = "export" ] && [ "$2" = "ses_title123" ]; then
+  cat <<JSON
+{"info":{"title":"TitleMatch","directory":"/projects/title"}}
+JSON
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$fakebin/opencode"
+
+  local out_file="$TMUX_ARCHIVE_DIR/oc_capture_title.archive"
+  local base="$TMUX_ARCHIVE_DIR/oc_capture_title"
+  local pane_file="${base}_w1_p0.pane"
+  cat > "$pane_file" << 'EOF'
+no session id here
+EOF
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_capture_session 'dummy-session' '$out_file' '$base'
+  "
+  [ "$status" -eq 0 ]
+
+  local line
+  line=$(cat "$out_file")
+  echo "line: $line"
+  [[ "$line" == *"|ses_title123|"* ]]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_capture_session prefers JSON title lookup over ambiguous table output" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+
+  cat > "$fakebin/tmux" << 'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "list-panes" ]; then
+  echo "%1"
+  exit 0
+fi
+if [ "$1" = "display-message" ] && [ "$2" = "-p" ] && [ "$3" = "-t" ] && [ "$4" = "%1" ]; then
+  case "$5" in
+    '#{window_index}') echo "1" ;;
+    '#{pane_index}') echo "0" ;;
+    '#{pane_title}') echo "OC | JsonTitle" ;;
+    '#{pane_current_path}') echo "/projects/json" ;;
+    *) echo "" ;;
+  esac
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$fakebin/tmux"
+
+  cat > "$fakebin/opencode" << 'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "session" ] && [ "$2" = "list" ] && [ "$3" = "--format" ] && [ "$4" = "json" ]; then
+  cat <<JSON
+[{"id":"ses_json777","title":"JsonTitle"}]
+JSON
+  exit 0
+fi
+if [ "$1" = "session" ] && [ "$2" = "list" ]; then
+  # Ambiguous/incorrect table row should not win when JSON exists
+  echo "ses_wrong111 JsonTitle"
+  exit 0
+fi
+if [ "$1" = "export" ] && [ "$2" = "ses_json777" ]; then
+  cat <<JSON
+{"info":{"title":"JsonTitle","directory":"/projects/json"}}
+JSON
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$fakebin/opencode"
+
+  local out_file="$TMUX_ARCHIVE_DIR/oc_capture_json.archive"
+  local base="$TMUX_ARCHIVE_DIR/oc_capture_json"
+  local pane_file="${base}_w1_p0.pane"
+  : > "$pane_file"
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_capture_session 'dummy-session' '$out_file' '$base'
+  "
+  [ "$status" -eq 0 ]
+
+  local line
+  line=$(cat "$out_file")
+  echo "line: $line"
+  [[ "$line" == *"|ses_json777|"* ]]
+  [[ "$line" != *"|ses_wrong111|"* ]]
+
+  rm -rf "$fakebin"
+}

@@ -5,10 +5,58 @@
 # ── Capture ─────────────────────────────────────────────────────────────────
 # Append OpenCode session data to the archive file's ---OPENCODE--- section.
 # Called from lib/core.sh during `tmux-archive save`.
+_tmux_oc_detect_sid_from_pane() {
+  local pane_file="$1"
+  [ -f "$pane_file" ] || return 1
+
+  local sid=''
+  sid=$(grep -Eo 'opencode[[:space:]]+-s[[:space:]]+ses_[A-Za-z0-9]+' "$pane_file" 2>/dev/null | awk '{print $3}' | tail -1)
+  [ -z "$sid" ] && sid=$(grep -Eo 'ses_[A-Za-z0-9]+' "$pane_file" 2>/dev/null | tail -1)
+  [ -z "$sid" ] && return 1
+  echo "$sid"
+}
+
+_tmux_oc_sid_from_title() {
+  local title="$1" list_json="$2" list_table="$3"
+  [ -z "$title" ] && return 1
+
+  local sid=''
+  if [ -n "$list_json" ]; then
+    sid=$(python3 -c 'import json,sys
+title=sys.argv[1].strip()
+raw=sys.stdin.read().strip()
+if not raw:
+    raise SystemExit(0)
+try:
+    data=json.loads(raw)
+except Exception:
+    raise SystemExit(0)
+items=data if isinstance(data,list) else [data]
+for item in items:
+    if not isinstance(item,dict):
+        continue
+    sid=item.get("id","")
+    ititle=item.get("title")
+    if not ititle and isinstance(item.get("info"),dict):
+        ititle=item["info"].get("title","")
+    if isinstance(sid,str) and sid.startswith("ses_") and isinstance(ititle,str) and ititle.strip()==title:
+        print(sid)
+        break' "$title" <<< "$list_json" 2>/dev/null)
+  fi
+
+  if [ -z "$sid" ] && [ -n "$list_table" ]; then
+    sid=$(echo "$list_table" | awk -v t="$title" 'index($0, t) > 0 {print $1; exit}')
+  fi
+
+  [ -z "$sid" ] && return 1
+  echo "$sid"
+}
+
 _tmux_oc_capture_session() {
   local session="$1" file="$2" base="$3"
   command -v opencode &>/dev/null || return 0
 
+  local oc_list_json=$(opencode session list --format json 2>/dev/null)
   local oc_list=$(opencode session list 2>/dev/null)
   local pane_ids=$(tmux list-panes -t "$session" -F '#{pane_id}' 2>/dev/null)
 
@@ -22,15 +70,14 @@ _tmux_oc_capture_session() {
 
     local pane_file="${base}_w${_widx}_p${_pidx}.pane"
     local detected_sid=''
-    if [ -f "$pane_file" ]; then
-      detected_sid=$(grep -Eo 'ses_[A-Za-z0-9]+' "$pane_file" | tail -1)
-    fi
+    detected_sid=$(_tmux_oc_detect_sid_from_pane "$pane_file")
 
     if [[ "$_title" == "OC |"* ]]; then
       local oc_title="${_title#OC | }"
-      local oc_sid=$(echo "$oc_list" | awk -v t="$oc_title" 'index($0, t) > 0 {print $1;
-      exit}')
-      [ -z "$oc_sid" ] && oc_sid="$detected_sid"
+      local oc_sid="$detected_sid"
+      if [ -z "$oc_sid" ]; then
+        oc_sid=$(_tmux_oc_sid_from_title "$oc_title" "$oc_list_json" "$oc_list")
+      fi
       local oc_dir="$_ppath"
       if [ -n "$oc_sid" ]; then
         _tmux_oc_enrich_meta "$oc_sid" oc_title oc_dir
