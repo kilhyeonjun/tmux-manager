@@ -12,7 +12,11 @@ shift
 case "$segment" in
   refresh_tabs)
     # Debounce: prevent re-execution within TMUX_MANAGER_DEBOUNCE_SEC
-    local lockfile="/tmp/.tmux-status-lock"
+    local _tmux_uid="${UID:-$(id -u 2>/dev/null || echo 0)}"
+    local _tmux_socket_key="${TMUX%%,*}"
+    [ -z "$_tmux_socket_key" ] && _tmux_socket_key='nosocket'
+    _tmux_socket_key=$(printf '%s' "$_tmux_socket_key" | tr -c '[:alnum:]_.-' '_')
+    local lockfile="/tmp/.tmux-status-lock-${_tmux_uid}-${_tmux_socket_key}"
     if [ -f "$lockfile" ]; then
       local lock_age=$(( $(date +%s) - $(stat -f%m "$lockfile" 2>/dev/null || echo 0) ))
       [ "$lock_age" -lt "${TMUX_MANAGER_DEBOUNCE_SEC:-2}" ] && exit 0
@@ -55,11 +59,11 @@ case "$segment" in
 
     # Load pid_metrics into associative arrays
     typeset -A pm_cpu pm_mem
-    echo "$pid_metrics" | while IFS=$'\t' read -r _pid _cpu _mem; do
+    while IFS=$'\t' read -r _pid _cpu _mem; do
       [ -z "$_pid" ] && continue
       pm_cpu[$_pid]="$_cpu"
       pm_mem[$_pid]="$_mem"
-    done
+    done <<< "$pid_metrics"
 
     # 3) Git branch cache (deduplicate per directory)
     typeset -A git_cache
@@ -69,7 +73,7 @@ case "$segment" in
     typeset -A sess_cpu sess_mem
 
     # 5) Pane loop — set pane options + aggregate
-    echo "$pane_data" | while IFS=$'\t' read -r pid sid widx ppath ptitle ppid; do
+    while IFS=$'\t' read -r pid sid widx ppath ptitle ppid; do
       [ -z "$pid" ] && continue
       local wkey="${sid}:${widx}"
 
@@ -122,7 +126,7 @@ case "$segment" in
       # Session aggregation
       sess_cpu[$sid]=$(( ${sess_cpu[$sid]:-0} + pcpu ))
       sess_mem[$sid]=$(( ${sess_mem[$sid]:-0} + pmem ))
-    done
+    done <<< "$pane_data"
 
     # 6) Set window options
     for wkey in ${(k)win_cpu}; do

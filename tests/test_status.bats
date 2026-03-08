@@ -12,12 +12,15 @@ load helpers/setup
 }
 
 @test "status.sh debounce lockfile creation" {
-  local lockfile="/tmp/.tmux-status-lock"
+  local tmux_env="/tmp/tmux-test/default,123,0"
+  local socket_key
+  socket_key=$(printf '%s' "/tmp/tmux-test/default" | tr -c '[:alnum:]_.-' '_')
+  local lockfile="/tmp/.tmux-status-lock-$(id -u)-${socket_key}"
   rm -f "$lockfile"
 
   # Without tmux, refresh_tabs will exit early (no pane_data)
   # but should create the lockfile first
-  run env TMUX_MANAGER_DEBOUNCE_SEC=30 zsh "$TMUX_MANAGER_DIR/lib/status.sh" refresh_tabs
+  run env TMUX_MANAGER_DEBOUNCE_SEC=30 TMUX="$tmux_env" zsh "$TMUX_MANAGER_DIR/lib/status.sh" refresh_tabs
   [ -f "$lockfile" ]
 
   # Record lockfile timestamp
@@ -25,7 +28,7 @@ load helpers/setup
   first_mtime=$(stat -f%m "$lockfile" 2>/dev/null)
 
   # Running again immediately should exit due to debounce
-  run env TMUX_MANAGER_DEBOUNCE_SEC=30 zsh "$TMUX_MANAGER_DIR/lib/status.sh" refresh_tabs
+  run env TMUX_MANAGER_DEBOUNCE_SEC=30 TMUX="$tmux_env" zsh "$TMUX_MANAGER_DIR/lib/status.sh" refresh_tabs
   local second_mtime
   second_mtime=$(stat -f%m "$lockfile" 2>/dev/null)
 
@@ -33,6 +36,23 @@ load helpers/setup
   [ "$first_mtime" = "$second_mtime" ]
 
   rm -f "$lockfile"
+}
+
+@test "status.sh lockfile differs by tmux socket" {
+  local key_a key_b lock_a lock_b
+  key_a=$(printf '%s' '/tmp/tmux-A/default' | tr -c '[:alnum:]_.-' '_')
+  key_b=$(printf '%s' '/tmp/tmux-B/default' | tr -c '[:alnum:]_.-' '_')
+  lock_a="/tmp/.tmux-status-lock-$(id -u)-${key_a}"
+  lock_b="/tmp/.tmux-status-lock-$(id -u)-${key_b}"
+  rm -f "$lock_a" "$lock_b"
+
+  run env TMUX_MANAGER_DEBOUNCE_SEC=30 TMUX='/tmp/tmux-A/default,111,0' zsh "$TMUX_MANAGER_DIR/lib/status.sh" refresh_tabs
+  [ -f "$lock_a" ]
+
+  run env TMUX_MANAGER_DEBOUNCE_SEC=30 TMUX='/tmp/tmux-B/default,222,0' zsh "$TMUX_MANAGER_DIR/lib/status.sh" refresh_tabs
+  [ -f "$lock_b" ]
+
+  rm -f "$lock_a" "$lock_b"
 }
 
 @test "status script is valid zsh" {

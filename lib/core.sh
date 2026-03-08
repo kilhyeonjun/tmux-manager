@@ -248,7 +248,11 @@ tmux-archive() {
       local ts=$(date +%Y%m%d_%H%M%S)
       local safe_name=$(echo "$session" | tr ' ' '_')
       local file="$TMUX_ARCHIVE_DIR/${safe_name}_${ts}.archive"
-      {
+      local tmp_file
+      tmp_file=$(mktemp "${TMUX_ARCHIVE_DIR}/.${safe_name}_${ts}.XXXXXX.tmp") || {
+        echo "\033[31m아카이브 임시 파일 생성 실패\033[0m"; return 1
+      }
+      if ! {
         echo "SESSION_NAME=$session"
         echo "SESSION_UUID=$uuid"
         echo "ARCHIVED_AT=$(date '+%Y-%m-%d %H:%M:%S')"
@@ -263,7 +267,21 @@ tmux-archive() {
         tmux list-windows -t "$session" -F '#{window_index}|#{window_name}|#{window_layout}' 2>/dev/null
         echo "---PANES---"
         tmux list-panes -t "$session" -F '#{session_name}|#{window_index}|#{pane_index}|#{pane_current_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null
-      } > "$file"
+      } > "$tmp_file"; then
+        rm -f "$tmp_file"
+        echo "\033[31m아카이브 저장 실패: $session\033[0m"
+        return 1
+      fi
+      # Plugin hook: capture OpenCode sessions
+      echo "---OPENCODE---" >> "$tmp_file"
+      if typeset -f _tmux_oc_capture_session > /dev/null 2>&1; then
+        _tmux_oc_capture_session "$session" "$tmp_file" "${file%.archive}"
+      fi
+      if ! mv -f "$tmp_file" "$file"; then
+        rm -f "$tmp_file"
+        echo "\033[31m아카이브 파일 finalize 실패: $session\033[0m"
+        return 1
+      fi
       # Capture scrollback
       local base="${file%.archive}"
       local capture_start='-'
@@ -277,11 +295,6 @@ tmux-archive() {
       tmux list-panes -t "$session" -F '#{window_index}|#{pane_index}' 2>/dev/null | while IFS='|' read -r _widx _pidx; do
         tmux capture-pane -t "${session}:${_widx}.${_pidx}" -p -S "$capture_start" > "${base}_w${_widx}_p${_pidx}.pane" 2>/dev/null
       done
-      # Plugin hook: capture OpenCode sessions
-      echo "---OPENCODE---" >> "$file"
-      if typeset -f _tmux_oc_capture_session > /dev/null 2>&1; then
-        _tmux_oc_capture_session "$session" "$file" "$base"
-      fi
       [ "$auto_mode" != 'auto' ] && echo "\033[32m✓ 아카이브 저장: $session → $file\033[0m"
       ;;
     save-and-kill)

@@ -75,7 +75,8 @@ _tmux_archive_restore() {
         tmux send-keys -t "${target}.${pidx}" " cat '${pane_file}'" Enter
         sleep 0.3
       fi
-      tmux send-keys -t "${target}.${pidx}" "cd $ppath" Enter
+      local qpath="${(q)ppath}"
+      tmux send-keys -t "${target}.${pidx}" "cd -- $qpath" Enter
       prev_widx="$widx"
     else
       tmux split-window -t "$target" -c "$ppath"

@@ -16,7 +16,7 @@ source "$TMUX_MANAGER_DIR/lib/core.sh"
 source "$TMUX_MANAGER_DIR/lib/restore.sh"
 
 # Auto-load plugins
-for _tmux_mgr_plugin in "$TMUX_MANAGER_DIR/plugins/"*.sh(N); do
+for _tmux_mgr_plugin in "$TMUX_MANAGER_PLUGINS_DIR"/*.sh(N); do
   source "$_tmux_mgr_plugin"
 done
 unset _tmux_mgr_plugin
