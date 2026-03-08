@@ -17,7 +17,7 @@ load helpers/setup
 
   # Without tmux, refresh_tabs will exit early (no pane_data)
   # but should create the lockfile first
-  run zsh "$TMUX_MANAGER_DIR/lib/status.sh" refresh_tabs
+  run env TMUX_MANAGER_DEBOUNCE_SEC=30 zsh "$TMUX_MANAGER_DIR/lib/status.sh" refresh_tabs
   [ -f "$lockfile" ]
 
   # Record lockfile timestamp
@@ -25,7 +25,7 @@ load helpers/setup
   first_mtime=$(stat -f%m "$lockfile" 2>/dev/null)
 
   # Running again immediately should exit due to debounce
-  run zsh "$TMUX_MANAGER_DIR/lib/status.sh" refresh_tabs
+  run env TMUX_MANAGER_DEBOUNCE_SEC=30 zsh "$TMUX_MANAGER_DIR/lib/status.sh" refresh_tabs
   local second_mtime
   second_mtime=$(stat -f%m "$lockfile" 2>/dev/null)
 

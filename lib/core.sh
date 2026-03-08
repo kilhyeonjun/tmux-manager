@@ -339,7 +339,7 @@ tmux-archive() {
 #  Archive Manager — Level 1: UUID group list
 # ═══════════════════════════════════════════════════════════════════════════
 _tmux_archive_manager() {
-  setopt local_options nonomatch
+  setopt local_options nonomatch typeset_silent
   while true; do
     local archive_count=$(print -rl -- "$TMUX_ARCHIVE_DIR"/*.archive(N) | wc -l | tr -d ' ')
     clear
@@ -434,7 +434,7 @@ _tmux_archive_manager() {
 #  Archive Manager — Level 2: snapshots within a group
 # ═══════════════════════════════════════════════════════════════════════════
 _tmux_archive_level2() {
-  setopt local_options nonomatch
+  setopt local_options nonomatch typeset_silent
   local target_uuid="$1"
   local group_name="$2"
   while true; do
@@ -543,7 +543,7 @@ _tmux_archive_save_flow() {
 #  Main session manager (fzf)
 # ═══════════════════════════════════════════════════════════════════════════
 tmux-manager() {
-  setopt local_options nonomatch
+  setopt local_options nonomatch typeset_silent
   local archive_count=$(print -rl -- "$TMUX_ARCHIVE_DIR"/*.archive(N) | wc -l | tr -d ' ')
   if ! tmux ls &>/dev/null; then
     clear
