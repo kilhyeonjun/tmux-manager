@@ -127,3 +127,21 @@ EOF
   [[ "$result" == *"nvim"* ]]
   [[ "$result" == *"tail"* ]]
 }
+
+@test "preview.sh archive mode works without OPENCODE marker" {
+  local file="$TMUX_ARCHIVE_DIR/no_oc_marker_preview.archive"
+  cat > "$file" << 'EOF'
+SESSION_NAME=no-oc-preview
+SESSION_UUID=no-oc-preview-uuid
+ARCHIVED_AT=2025-02-01 10:00:00
+---WINDOWS---
+1|main|tiled
+---PANES---
+no-oc-preview|1|0|/tmp|zsh|zsh
+EOF
+
+  result=$(zsh "$TMUX_MANAGER_DIR/lib/preview.sh" archive "$file" 2>&1)
+  [[ "$result" == *"no-oc-preview"* ]]
+  [[ "$result" == *"1w"* ]]
+  [[ "$result" == *"1p"* ]]
+}

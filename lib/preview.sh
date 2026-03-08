@@ -4,6 +4,7 @@
 # Usage: preview.sh live <session> | archive <file> | group <uuid>
 
 TMUX_MANAGER_DIR="${0:A:h:h}"
+source "$TMUX_MANAGER_DIR/lib/archive_format.sh"
 
 mode="$1"
 target="$2"
@@ -112,30 +113,38 @@ case "$mode" in
     file="$target"
     [ ! -f "$file" ] && echo "파일 없음" && exit 1
 
-    # Header
-    name=$(grep '^SESSION_NAME=' "$file" | cut -d= -f2)
-    date=$(grep '^ARCHIVED_AT=' "$file" | cut -d= -f2-)
-    wins=$(grep -A9999 '^---WINDOWS---' "$file" | grep -B9999 '^---PANES---' | grep -v '^---' | grep -c '.')
-    panes=$(grep -A9999 '^---PANES---' "$file" | grep -B9999 '^---OPENCODE---' | grep -v '^---' | grep -c '.' 2>/dev/null)
+    fmt=$(_tmux_af_format_version "$file")
+    name=$(_tmux_af_header_get "$file" SESSION_NAME)
+    date=$(_tmux_af_header_get "$file" ARCHIVED_AT)
+    wins=$(_tmux_af_section_lines "$file" '---WINDOWS---' '---PANES---' | grep -c '[^[:space:]]' 2>/dev/null)
+    panes_raw=$(_tmux_af_section_lines "$file" '---PANES---' '---OPENCODE---')
+    [ -z "$(echo "$panes_raw" | tr -d '[:space:]')" ] && panes_raw=$(_tmux_af_section_lines "$file" '---PANES---' '')
+    panes=$(echo "$panes_raw" | grep -c '[^[:space:]]' 2>/dev/null)
     printf "\033[1;36m%s\033[0m  \033[90marchived\033[0m\n" "$name"
     printf "\033[90m%s  %sw %sp\033[0m\n" "$date" "$wins" "$panes"
     _divider
 
-    oc_lines=$(grep -A9999 '^---OPENCODE---' "$file" | grep -v '^---')
-    # Pane list
-    grep -A9999 '^---PANES---' "$file" | grep -B9999 '^---OPENCODE---' | grep -v '^---' | while IFS='|' read -r sn widx pidx ppath pcmd ptitle; do
+    oc_lines=$(_tmux_af_section_lines "$file" '---OPENCODE---' '')
+    echo "$panes_raw" | while IFS='|' read -r sn widx pidx ppath pcmd ptitle; do
       [ -z "$sn" ] && continue
+      sn=$(_tmux_af_decode_field_if_needed "$fmt" "$sn")
+      ppath=$(_tmux_af_decode_field_if_needed "$fmt" "$ppath")
+      pcmd=$(_tmux_af_decode_field_if_needed "$fmt" "$pcmd")
+      ptitle=$(_tmux_af_decode_field_if_needed "$fmt" "$ptitle")
       oc_sid=$(echo "$oc_lines" | awk -F'|' -v w="$widx" -v p="$pidx" '$1==w && $2==p {print $3; exit}')
+      oc_sid=$(_tmux_af_decode_field_if_needed "$fmt" "$oc_sid")
       _pane_line "$widx" "$pidx" "$pcmd" "$ppath" "$ptitle" "$oc_sid"
     done
 
-    # OpenCode restore info
     oc_count=$(echo "$oc_lines" | grep -c '.' 2>/dev/null)
     if [ "$oc_count" -gt 0 ] 2>/dev/null; then
       _divider
       printf "\033[34m▸ opencode %s개 복원 가능\033[0m\n" "$oc_count"
       echo "$oc_lines" | while IFS='|' read -r widx pidx sid title dir; do
         [ -z "$widx" ] && continue
+        sid=$(_tmux_af_decode_field_if_needed "$fmt" "$sid")
+        title=$(_tmux_af_decode_field_if_needed "$fmt" "$title")
+        dir=$(_tmux_af_decode_field_if_needed "$fmt" "$dir")
         printf "  \033[36m%s\033[0m\n" "$title"
         printf "  \033[90m%s  %s\033[0m\n" "$sid" "$dir"
       done

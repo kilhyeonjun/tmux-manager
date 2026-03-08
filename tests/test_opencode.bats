@@ -373,3 +373,67 @@ EOF
 
   rm -rf "$fakebin"
 }
+
+@test "oc_prompt_restart is skipped on non-tty" {
+  run zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_prompt_restart 'sess' 'w1|ses_abc|/tmp|Title\n'
+    echo done
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"done"* ]]
+}
+
+@test "oc_setup_restored_pane accepts explicit pane target" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    tmux() { :; }
+    local _TMUX_RESTORE_RUNNING_CMDS=''
+    local _TMUX_RESTORE_OC_PANES=''
+    local _TMUX_RESTORE_ARCHIVE_FMT=2
+    _tmux_oc_setup_restored_pane 'sess:1' '1' '0' 'OC | Raw' '/tmp' '1|0|ses_abc|My%7CTitle|/a%7Cb' '%99'
+    echo "PANES=\$_TMUX_RESTORE_OC_PANES"
+    echo "CMDS=\$_TMUX_RESTORE_RUNNING_CMDS"
+  " 2>&1)
+
+  [[ "$result" == *"%99|ses_abc|%2Fa%7Cb|Raw"* ]]
+}
+
+@test "oc_sid_from_title falls back to table when json is malformed" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_sid_from_title 'Needle Title' '{bad json' 'ses_table001 Needle Title'
+  ")
+  [ "$result" = "ses_table001" ]
+}
+
+@test "oc_enrich_meta keeps input values when export payload is invalid" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+
+  cat > "$fakebin/opencode" << 'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "export" ]; then
+  echo '{broken json'
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$fakebin/opencode"
+
+  result=$(zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    local t='keep-title'
+    local d='/keep/dir'
+    _tmux_oc_enrich_meta 'ses_x' t d
+    echo \"T=\$t\"
+    echo \"D=\$d\"
+  ")
+
+  [[ "$result" == *"T=keep-title"* ]]
+  [[ "$result" == *"D=/keep/dir"* ]]
+  rm -rf "$fakebin"
+}

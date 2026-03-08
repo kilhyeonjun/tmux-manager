@@ -1,6 +1,10 @@
 # tmux-manager — core archive operations, groups, fzf manager UI
 # Sourced by init.sh
 
+if ! typeset -f _tmux_af_format_version > /dev/null 2>&1; then
+  source "$TMUX_MANAGER_DIR/lib/archive_format.sh" 2>/dev/null
+fi
+
 # ── UUID helper ─────────────────────────────────────────────────────────────
 _tmux_ensure_uuid() {
   local session="${1:-$(tmux display-message -p '#{session_name}' 2>/dev/null)}"
@@ -17,7 +21,7 @@ _tmux_ensure_uuid() {
 _tmux_archive_delete_file() {
   local file="$1"
   [ ! -f "$file" ] && return 1
-  local name=$(grep '^SESSION_NAME=' "$file" | cut -d= -f2)
+  local name=$(_tmux_af_header_get "$file" SESSION_NAME)
   local fbase="${file%.archive}"
   rm -f "${fbase}"_w*_p*.pane 2>/dev/null
   rm -f "$file" && echo "\033[31m✓ 삭제: $name\033[0m"
@@ -27,38 +31,35 @@ _tmux_archive_delete_file() {
 _tmux_archive_meta() {
   local file="$1"
   [ ! -f "$file" ] && return 1
-  awk -F'|' '
-    BEGIN {
-      uuid=""; name=""; date=""; is_auto=0
-      in_windows=0; in_opencode=0
-      wins=0; oc_count=0; sid_missing=0; oc_title=""; oc_sid=""
-    }
-    /^SESSION_UUID=/ { uuid=substr($0,14); next }
-    /^SESSION_NAME=/ { name=substr($0,14); next }
-    /^ARCHIVED_AT=/ { date=substr($0,13); next }
-    /^AUTO_ARCHIVED=true$/ { is_auto=1; next }
-    /^---WINDOWS---$/ { in_windows=1; in_opencode=0; next }
-    /^---PANES---$/ { in_windows=0; next }
-    /^---OPENCODE---$/ { in_opencode=1; next }
-    {
-      if (in_windows && $0 !~ /^---/ && length($0) > 0) wins++
-      if (in_opencode && $0 ~ /^[0-9]+\|/) {
-        n = split($0, a, "|")
-        oc_count++
-        if (n >= 3 && a[3] == "") sid_missing++
-        if (n >= 4 && oc_title == "" && a[4] != "") oc_title = a[4]
-        if (n >= 3 && oc_sid == "" && a[3] != "") oc_sid = a[3]
-      }
-    }
-    END {
-      if (uuid == "") uuid = "_legacy"
-      gsub(/\r/, "", name)
-      gsub(/\r/, "", date)
-      gsub(/\r/, "", oc_title)
-      gsub(/\r/, "", oc_sid)
-      printf "%s|%s|%s|%d|%d|%d|%d|%s|%s\n", uuid, name, date, is_auto, wins, oc_count, sid_missing, oc_title, oc_sid
-    }
-  ' "$file"
+  local fmt
+  fmt=$(_tmux_af_format_version "$file")
+  local uuid name date
+  uuid=$(_tmux_af_header_get "$file" SESSION_UUID)
+  name=$(_tmux_af_header_get "$file" SESSION_NAME)
+  date=$(_tmux_af_header_get "$file" ARCHIVED_AT)
+  [ -z "$uuid" ] && uuid='_legacy'
+
+  local is_auto=0
+  grep -q '^AUTO_ARCHIVED=true$' "$file" && is_auto=1
+
+  local wins=0
+  wins=$(_tmux_af_section_lines "$file" '---WINDOWS---' '---PANES---' | grep -c '[^[:space:]]' 2>/dev/null)
+
+  local oc_count=0 sid_missing=0 oc_title='' oc_sid=''
+  local line widx pidx sid title dir
+  while IFS='|' read -r widx pidx sid title dir; do
+    [ -z "$widx" ] && continue
+    oc_count=$((oc_count + 1))
+    sid=$(_tmux_af_decode_field_if_needed "$fmt" "$sid")
+    title=$(_tmux_af_decode_field_if_needed "$fmt" "$title")
+    if [ -z "$sid" ]; then
+      sid_missing=$((sid_missing + 1))
+    fi
+    [ -z "$oc_title" ] && [ -n "$title" ] && oc_title="$title"
+    [ -z "$oc_sid" ] && [ -n "$sid" ] && oc_sid="$sid"
+  done < <(_tmux_af_section_lines "$file" '---OPENCODE---' '')
+
+  printf '%s|%s|%s|%d|%d|%d|%d|%s|%s\n' "$uuid" "$name" "$date" "$is_auto" "$wins" "$oc_count" "$sid_missing" "$oc_title" "$oc_sid"
 }
 
 # ── UUID group aggregation ──────────────────────────────────────────────────
@@ -148,7 +149,7 @@ _tmux_archive_delete_group() {
   local deleted=0
   for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
     [ ! -f "$f" ] && continue
-    local uuid=$(grep '^SESSION_UUID=' "$f" | cut -d= -f2)
+    local uuid=$(_tmux_af_header_get "$f" SESSION_UUID)
     [ -z "$uuid" ] && uuid='_legacy'
     if [ "$uuid" = "$target_uuid" ]; then
       local fbase="${f%.archive}"
@@ -192,7 +193,7 @@ _tmux_autoarchive_cleanup() {
   do
     [ ! -f "$f" ] && continue
     grep -q '^AUTO_ARCHIVED=true' "$f" || continue
-    local uuid=$(grep '^SESSION_UUID=' "$f" | cut -d= -f2)
+    local uuid=$(_tmux_af_header_get "$f" SESSION_UUID)
     [ -z "$uuid" ] && uuid='_legacy'
     echo "$uuid"
   done | sort -u)
@@ -220,7 +221,7 @@ _tmux_autoarchive_cleanup() {
     done < <(for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
       [ ! -f "$f" ] && continue
       grep -q '^AUTO_ARCHIVED=true' "$f" || continue
-      local fuuid=$(grep '^SESSION_UUID=' "$f" | cut -d= -f2)
+      local fuuid=$(_tmux_af_header_get "$f" SESSION_UUID)
       [ -z "$fuuid" ] && fuuid='_legacy'
       [ "$fuuid" = "$uuid" ] && echo "$f"
     done | sort -r)
@@ -248,12 +249,15 @@ tmux-archive() {
       local ts=$(date +%Y%m%d_%H%M%S)
       local safe_name=$(echo "$session" | tr ' ' '_')
       local file="$TMUX_ARCHIVE_DIR/${safe_name}_${ts}.archive"
+      local escaped_session
+      escaped_session=$(_tmux_af_escape "$session")
       local tmp_file
       tmp_file=$(mktemp "${TMUX_ARCHIVE_DIR}/.${safe_name}_${ts}.XXXXXX.tmp") || {
         echo "\033[31m아카이브 임시 파일 생성 실패\033[0m"; return 1
       }
       if ! {
-        echo "SESSION_NAME=$session"
+        echo "FORMAT_VERSION=2"
+        echo "SESSION_NAME=$escaped_session"
         echo "SESSION_UUID=$uuid"
         echo "ARCHIVED_AT=$(date '+%Y-%m-%d %H:%M:%S')"
         if [ "$auto_mode" = 'auto' ]; then
@@ -264,9 +268,15 @@ tmux-archive() {
           echo "SCROLLBACK_MODE=full"
         fi
         echo "---WINDOWS---"
-        tmux list-windows -t "$session" -F '#{window_index}|#{window_name}|#{window_layout}' 2>/dev/null
+        tmux list-windows -t "$session" -F "#{window_index}$(printf '\t')#{window_name}$(printf '\t')#{window_layout}" 2>/dev/null | while IFS=$'\t' read -r widx wname wlayout; do
+          printf '%s|%s|%s\n' "$widx" "$(_tmux_af_escape "$wname")" "$(_tmux_af_escape "$wlayout")"
+        done
         echo "---PANES---"
-        tmux list-panes -t "$session" -F '#{session_name}|#{window_index}|#{pane_index}|#{pane_current_path}|#{pane_current_command}|#{pane_title}' 2>/dev/null
+        tmux list-panes -t "$session" -F "#{session_name}$(printf '\t')#{window_index}$(printf '\t')#{pane_index}$(printf '\t')#{pane_current_path}$(printf '\t')#{pane_current_command}$(printf '\t')#{pane_title}" 2>/dev/null | while IFS=$'\t' read -r sn widx pidx ppath pcmd ptitle; do
+          printf '%s|%s|%s|%s|%s|%s\n' \
+            "$(_tmux_af_escape "$sn")" "$widx" "$pidx" \
+            "$(_tmux_af_escape "$ppath")" "$(_tmux_af_escape "$pcmd")" "$(_tmux_af_escape "$ptitle")"
+        done
       } > "$tmp_file"; then
         rm -f "$tmp_file"
         echo "\033[31m아카이브 저장 실패: $session\033[0m"
@@ -317,10 +327,10 @@ tmux-archive() {
       echo '\033[1;36m━━━ tmux 아카이브 목록 ━━━\033[0m'
       echo ''
       for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
-        local name=$(grep '^SESSION_NAME=' "$f" | cut -d= -f2)
-        local date=$(grep '^ARCHIVED_AT=' "$f" | cut -d= -f2-)
+        local name=$(_tmux_af_header_get "$f" SESSION_NAME)
+        local date=$(_tmux_af_header_get "$f" ARCHIVED_AT)
         local wins
-        wins=$(grep -c '.' <(grep -A9999 '^---WINDOWS---' "$f" | grep -B9999 '^---PANES---' | grep -v '^---') 2>/dev/null)
+        wins=$(_tmux_af_section_lines "$f" '---WINDOWS---' '---PANES---' | grep -c '[^[:space:]]' 2>/dev/null)
         printf '  \033[36m%-18s\033[0m  %s  \033[90m%sw\033[0m\n' "$name" "$date" "$wins"
       done
       ;;
@@ -328,8 +338,8 @@ tmux-archive() {
       local file="$2"
       if [ -z "$file" ]; then
         file=$(ls -1 "$TMUX_ARCHIVE_DIR"/*.archive 2>/dev/null | while read -r f; do
-          local name=$(grep '^SESSION_NAME=' "$f" | cut -d= -f2)
-          local date=$(grep '^ARCHIVED_AT=' "$f" | cut -d= -f2-)
+          local name=$(_tmux_af_header_get "$f" SESSION_NAME)
+          local date=$(_tmux_af_header_get "$f" ARCHIVED_AT)
           printf '%s|%s  %s\n' "$f" "$name" "$date"
         done | fzf --height=50% --reverse --header='삭제할 아카이브 선택' -d'|' --with-nth=2 | cut -d'|' -f1)
         [ -z "$file" ] && return
@@ -504,7 +514,7 @@ _tmux_archive_level2() {
       return
     elif [ -n "$achoice" ]; then
       local session_name
-      session_name=$(grep '^SESSION_NAME=' "$achoice" | cut -d= -f2)
+      session_name=$(_tmux_af_header_get "$achoice" SESSION_NAME)
       if tmux has-session -t "$session_name" 2>/dev/null; then
         echo "\033[31m세션 '$session_name' 이미 존재. 다른 이름으로 복원할까요?\033[0m"
         local rname
@@ -514,14 +524,14 @@ _tmux_archive_level2() {
         fi
         local tmpfile
         tmpfile=$(mktemp)
-        sed "s/^SESSION_NAME=.*/SESSION_NAME=$rname/" "$achoice" > "$tmpfile"
+        _tmux_af_set_session_name_copy "$achoice" "$tmpfile" "$rname"
         tmux-archive restore "$tmpfile" || { rm -f "$tmpfile"; echo "\033[31m복원 실패\033[0m"; sleep 0.8; continue; }
         rm -f "$tmpfile"
         session_name="$rname"
       else
         tmux-archive restore "$achoice" || { echo "\033[31m복원 실패\033[0m"; sleep 0.8; continue; }
       fi
-      if grep -q '^[0-9]' <(grep -A9999 '^---OPENCODE---' "$achoice" 2>/dev/null); then
+      if _tmux_af_section_lines "$achoice" '---OPENCODE---' '' | grep -q '^[0-9]'; then
         sleep 1.5
       fi
       if _tmux_enter_session "$session_name"; then

@@ -12,6 +12,7 @@ source "$TMUX_MANAGER_DIR/conf/defaults.conf"
 # Core libraries
 source "$TMUX_MANAGER_DIR/lib/utils.sh"
 source "$TMUX_MANAGER_DIR/lib/metrics.sh"
+source "$TMUX_MANAGER_DIR/lib/archive_format.sh"
 source "$TMUX_MANAGER_DIR/lib/core.sh"
 source "$TMUX_MANAGER_DIR/lib/restore.sh"
 

@@ -20,6 +20,6 @@ load helpers/setup
   run grep -n 'local qpath="\${(q)ppath}"' "$TMUX_MANAGER_DIR/lib/restore.sh"
   [ "$status" -eq 0 ]
 
-  run grep -n 'tmux send-keys -t "\${target}\.\${pidx}" "cd -- \$qpath" Enter' "$TMUX_MANAGER_DIR/lib/restore.sh"
+  run grep -n 'tmux send-keys -t "\$pane_target" "cd -- \$qpath" Enter' "$TMUX_MANAGER_DIR/lib/restore.sh"
   [ "$status" -eq 0 ]
 }

@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 jobs:
   shellcheck:
@@ -35,7 +35,26 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install bats
+      - name: Install test dependencies
         run: brew install bats-core
-      - name: Run tests
-        run: bats tests/
+      - name: Run unit tests
+        run: |
+          bats \
+            tests/test_archive_format.bats \
+            tests/test_core.bats \
+            tests/test_metrics.bats \
+            tests/test_opencode.bats \
+            tests/test_preview.bats \
+            tests/test_quickwins.bats \
+            tests/test_spacing_regression.bats \
+            tests/test_status.bats
+
+  integration-macos:
+    name: Integration (tmux)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install integration dependencies
+        run: brew install bats-core tmux fzf
+      - name: Run tmux integration tests
+        run: bats tests/test_integration_tmux.bats
