@@ -460,3 +460,28 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"락 획득 실패"* ]]
 }
+
+@test "tmux-archive list output does not leak local variable assignments" {
+  local file="$TMUX_ARCHIVE_DIR/list_noleak.archive"
+  cat > "$file" << 'EOF'
+SESSION_NAME=list-check
+SESSION_UUID=list-check-uuid
+ARCHIVED_AT=2025-01-01 12:00:00
+---WINDOWS---
+1|main|tiled
+---PANES---
+list-check|1|0|/tmp|zsh|zsh
+---OPENCODE---
+EOF
+
+  run zsh -c "
+    export TMUX_ARCHIVE_DIR='$TMUX_ARCHIVE_DIR'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    tmux-archive list
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"list-check"* ]]
+  [[ "$output" != *"wins="* ]]
+}

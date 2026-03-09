@@ -47,3 +47,8 @@ load helpers/setup
   run grep -n '_tmux_af_require_python3.*아카이브 저장' "$TMUX_MANAGER_DIR/lib/core.sh"
   [ "$status" -ne 0 ]
 }
+
+@test "archive groups avoid echo -e based aggregation" {
+  run grep -n 'echo -e "\$groups"' "$TMUX_MANAGER_DIR/lib/core.sh"
+  [ "$status" -ne 0 ]
+}

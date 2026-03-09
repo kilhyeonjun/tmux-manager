@@ -71,14 +71,12 @@ _tmux_archive_meta() {
 
 # ── UUID group aggregation ──────────────────────────────────────────────────
 _tmux_archive_groups() {
-  setopt local_options nonomatch
-  local groups=''
+  setopt local_options nonomatch typeset_silent
   for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
     [ ! -f "$f" ] && continue
     local meta=$(_tmux_archive_meta "$f")
-    groups="${groups}${meta}\n"
-  done
-  echo -e "$groups" | awk -F'|' '
+    printf '%s\n' "$meta"
+  done | awk -F'|' '
     NF>=9 {
       uuid=$1; name=$2; date=$3; is_auto=$4; oc_cnt=$6; sid_miss=$7
       count[uuid]++
@@ -329,6 +327,7 @@ _tmux_archive_save_unlocked() {
 #  tmux-archive CLI
 # ═══════════════════════════════════════════════════════════════════════════
 tmux-archive() {
+  setopt local_options nonomatch typeset_silent
   mkdir -p "$TMUX_ARCHIVE_DIR"
   local cmd="${1:-help}"
   case "$cmd" in
