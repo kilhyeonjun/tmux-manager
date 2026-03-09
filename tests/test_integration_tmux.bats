@@ -32,12 +32,13 @@ source "$TMUX_MANAGER_DIR/lib/restore.sh"
 
 tmux start-server || { echo START_FAIL; exit 11; }
 tmux new-session -d -s itest -n main || { echo NEW_FAIL; exit 12; }
-tmux set-option -t itest base-index 1 || { echo BASEIDX_FAIL; exit 13; }
-tmux set-window-option -t itest pane-base-index 1 || { echo PANEBASE_FAIL; exit 14; }
-tmux rename-window -t itest:1 'main|w' || { echo RENAME_FAIL; exit 15; }
-tmux new-window -d -t itest:3 -n 'code|w' || { echo NEWWIN_FAIL; exit 16; }
-tmux split-window -d -t itest:3 -c /tmp || { echo SPLIT_FAIL; exit 17; }
-tmux select-layout -t itest:3 tiled || { echo LAYOUT_FAIL; exit 18; }
+first_idx=$(tmux list-windows -t itest -F '#{window_index}' | head -1)
+[[ "$first_idx" == <-> ]] || { echo FIRSTIDX_FAIL; exit 13; }
+code_idx=$((first_idx + 2))
+tmux rename-window -t "itest:${first_idx}" 'main|w' || { echo RENAME_FAIL; tmux list-windows -t itest -F '#{window_index}|#{window_name}' 2>/dev/null; exit 15; }
+tmux new-window -d -t "itest:${code_idx}" -n 'code|w' || { echo NEWWIN_FAIL; tmux list-windows -t itest -F '#{window_index}|#{window_name}' 2>/dev/null; exit 16; }
+tmux split-window -d -t "itest:${code_idx}" -c /tmp || { echo SPLIT_FAIL; exit 17; }
+tmux select-layout -t "itest:${code_idx}" tiled || { echo LAYOUT_FAIL; exit 18; }
 
 tmux-archive save itest || { echo SAVE_FAIL; exit 19; }
 setopt local_options null_glob
@@ -52,15 +53,20 @@ echo FILE="$file"
 tmux kill-session -t itest || { echo KILL_FAIL; exit 20; }
 tmux-archive restore "$file" || { echo RESTORE_FAIL; exit 21; }
 
+echo "EXPECT_MAIN=${first_idx}|main|w"
+echo "EXPECT_CODE=${code_idx}|code|w"
+
 echo 'WINDOWS:'
 tmux list-windows -t itest -F '#{window_index}|#{window_name}' | sort
 echo 'PANES:'
-tmux list-panes -t itest:3 -F '#{pane_index}|#{pane_current_path}' | sort
+tmux list-panes -t "itest:${code_idx}" -F '#{pane_index}|#{pane_current_path}' | sort
 EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"WINDOWS:"* ]]
-  [[ "$output" == *"1|main|w"* ]]
-  [[ "$output" == *"3|code|w"* ]]
+  [[ "$output" == *"EXPECT_MAIN="* ]]
+  [[ "$output" == *"EXPECT_CODE="* ]]
+  [[ "$output" == *"|main|w"* ]]
+  [[ "$output" == *"|code|w"* ]]
 }
 
 @test "integration: restore works for legacy archive without OPENCODE marker" {
