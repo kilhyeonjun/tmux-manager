@@ -13,13 +13,19 @@ _tmux_archive_restore_unlocked() {
   setopt local_options typeset_silent
   local file="$1"
   if [ -z "$file" ]; then
-    file=$(ls -1 "$TMUX_ARCHIVE_DIR"/*.archive 2>/dev/null | while read -r f; do
-      local name date wins
-      name=$(_tmux_af_header_get "$f" SESSION_NAME)
-      date=$(_tmux_af_header_get "$f" ARCHIVED_AT)
-      wins=$(_tmux_af_section_lines "$f" '---WINDOWS---' '---PANES---' | grep -c '[^[:space:]]' 2>/dev/null)
-      printf '%s|%s  %s  %sw\n' "$f" "$name" "$date" "$wins"
-    done | fzf --height=50% --reverse --header='복원할 아카이브 선택' -d'|' --with-nth=2 | cut -d'|' -f1)
+    if typeset -f _tmux_archive_meta_bulk > /dev/null 2>&1; then
+      file=$(_tmux_archive_meta_bulk | sort -t'|' -k4 -r | while IFS='|' read -r f uuid name date is_auto wins oc_count sid_missing oc_title oc_sid; do
+        printf '%s|%s  %s  %sw\n' "$f" "$name" "$date" "$wins"
+      done | fzf --height=50% --reverse --header='복원할 아카이브 선택' -d'|' --with-nth=2 | cut -d'|' -f1)
+    else
+      file=$(ls -1 "$TMUX_ARCHIVE_DIR"/*.archive 2>/dev/null | while read -r f; do
+        local name date wins
+        name=$(_tmux_af_header_get "$f" SESSION_NAME)
+        date=$(_tmux_af_header_get "$f" ARCHIVED_AT)
+        wins=$(_tmux_af_section_lines "$f" '---WINDOWS---' '---PANES---' | grep -c '[^[:space:]]' 2>/dev/null)
+        printf '%s|%s  %s  %sw\n' "$f" "$name" "$date" "$wins"
+      done | fzf --height=50% --reverse --header='복원할 아카이브 선택' -d'|' --with-nth=2 | cut -d'|' -f1)
+    fi
     [ -z "$file" ] && return
   fi
 

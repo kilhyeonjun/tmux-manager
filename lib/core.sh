@@ -38,47 +38,213 @@ _tmux_archive_delete_file() {
 _tmux_archive_meta() {
   local file="$1"
   [ ! -f "$file" ] && return 1
-  local fmt
-  fmt=$(_tmux_af_format_version "$file")
-  local uuid name date
-  uuid=$(_tmux_af_header_get "$file" SESSION_UUID)
-  name=$(_tmux_af_header_get "$file" SESSION_NAME)
-  date=$(_tmux_af_header_get "$file" ARCHIVED_AT)
-  [ -z "$uuid" ] && uuid='_legacy'
+  local parsed
+  parsed=$(awk '
+    BEGIN {
+      FS="\\|"
+      in_windows=0
+      in_oc=0
+      fmt=1
+      name=""
+      uuid=""
+      date=""
+      is_auto=0
+      wins=0
+      oc_count=0
+      sid_missing=0
+      oc_title=""
+      oc_sid=""
+    }
+    /^FORMAT_VERSION=/ {
+      v=substr($0,16)
+      if (v ~ /^[0-9]+$/) fmt=v+0
+      next
+    }
+    /^SESSION_NAME=/ {
+      if (name=="") name=substr($0,14)
+      next
+    }
+    /^SESSION_UUID=/ {
+      if (uuid=="") uuid=substr($0,14)
+      next
+    }
+    /^ARCHIVED_AT=/ {
+      if (date=="") date=substr($0,13)
+      next
+    }
+    /^AUTO_ARCHIVED=true$/ {
+      is_auto=1
+      next
+    }
+    /^---WINDOWS---$/ {
+      in_windows=1
+      in_oc=0
+      next
+    }
+    /^---PANES---$/ {
+      in_windows=0
+      in_oc=0
+      next
+    }
+    /^---OPENCODE---$/ {
+      in_windows=0
+      in_oc=1
+      next
+    }
+    {
+      if (in_windows && $0 ~ /[^[:space:]]/) wins++
+      if (in_oc) {
+        widx=$1
+        sid=$3
+        title=$4
+        if (widx != "") {
+          oc_count++
+          if (sid == "") sid_missing++
+          if (oc_title == "" && title != "") oc_title=title
+          if (oc_sid == "" && sid != "") oc_sid=sid
+        }
+      }
+    }
+    END {
+      if (uuid=="") uuid="_legacy"
+      printf "%d\037%s\037%s\037%s\037%d\037%d\037%d\037%d\037%s\037%s", fmt, uuid, name, date, is_auto, wins, oc_count, sid_missing, oc_title, oc_sid
+    }
+  ' "$file") || return 1
 
-  local is_auto=0
-  grep -q '^AUTO_ARCHIVED=true$' "$file" && is_auto=1
+  local fmt uuid name date is_auto wins oc_count sid_missing oc_title oc_sid
+  IFS=$'\037' read -r fmt uuid name date is_auto wins oc_count sid_missing oc_title oc_sid <<< "$parsed"
 
-  local wins=0
-  wins=$(_tmux_af_section_lines "$file" '---WINDOWS---' '---PANES---' | grep -c '[^[:space:]]' 2>/dev/null)
-
-  local oc_count=0 sid_missing=0 oc_title='' oc_sid=''
-  local line widx pidx sid title dir
-  while IFS='|' read -r widx pidx sid title dir; do
-    [ -z "$widx" ] && continue
-    oc_count=$((oc_count + 1))
-    sid=$(_tmux_af_decode_field_if_needed "$fmt" "$sid")
-    title=$(_tmux_af_decode_field_if_needed "$fmt" "$title")
-    if [ -z "$sid" ]; then
-      sid_missing=$((sid_missing + 1))
-    fi
-    [ -z "$oc_title" ] && [ -n "$title" ] && oc_title="$title"
-    [ -z "$oc_sid" ] && [ -n "$sid" ] && oc_sid="$sid"
-  done < <(_tmux_af_section_lines "$file" '---OPENCODE---' '')
+  name=$(_tmux_af_decode_field_if_needed "$fmt" "$name")
+  oc_title=$(_tmux_af_decode_field_if_needed "$fmt" "$oc_title")
+  oc_sid=$(_tmux_af_decode_field_if_needed "$fmt" "$oc_sid")
 
   printf '%s|%s|%s|%d|%d|%d|%d|%s|%s\n' "$uuid" "$name" "$date" "$is_auto" "$wins" "$oc_count" "$sid_missing" "$oc_title" "$oc_sid"
 }
 
+_tmux_archive_meta_bulk() {
+  setopt local_options nonomatch
+  local files=("$TMUX_ARCHIVE_DIR"/*.archive(N))
+  [ "${#files[@]}" -eq 0 ] && return 0
+
+  awk '
+    function hexdigit(c, p) {
+      c=toupper(c)
+      p=index("0123456789ABCDEF", c)
+      if (p==0) return -1
+      return p-1
+    }
+    function urldecode(s,    out,i,ch,h1,h2,d1,d2) {
+      out=""
+      for (i=1; i<=length(s); i++) {
+        ch=substr(s,i,1)
+        if (ch=="%" && i+2<=length(s)) {
+          h1=substr(s,i+1,1)
+          h2=substr(s,i+2,1)
+          d1=hexdigit(h1)
+          d2=hexdigit(h2)
+          if (d1>=0 && d2>=0) {
+            out = out sprintf("%c", d1*16 + d2)
+            i += 2
+            continue
+          }
+        }
+        out = out ch
+      }
+      return out
+    }
+    function reset_state() {
+      fmt=1
+      name=""
+      uuid=""
+      date=""
+      is_auto=0
+      wins=0
+      oc_count=0
+      sid_missing=0
+      oc_title=""
+      oc_sid=""
+      in_windows=0
+      in_oc=0
+    }
+    function emit_current(    out_name,out_title,out_sid) {
+      if (curr_file=="") return
+      if (uuid=="") uuid="_legacy"
+      out_name=name
+      out_title=oc_title
+      out_sid=oc_sid
+      if (fmt>=2) {
+        out_name=urldecode(out_name)
+        out_title=urldecode(out_title)
+        out_sid=urldecode(out_sid)
+      }
+      printf "%s|%s|%s|%s|%d|%d|%d|%d|%s|%s\n", curr_file, uuid, out_name, date, is_auto, wins, oc_count, sid_missing, out_title, out_sid
+    }
+    FNR==1 {
+      emit_current()
+      curr_file=FILENAME
+      reset_state()
+    }
+    /^FORMAT_VERSION=/ {
+      v=substr($0,16)
+      if (v ~ /^[0-9]+$/) fmt=v+0
+      next
+    }
+    /^SESSION_NAME=/ {
+      if (name=="") name=substr($0,14)
+      next
+    }
+    /^SESSION_UUID=/ {
+      if (uuid=="") uuid=substr($0,14)
+      next
+    }
+    /^ARCHIVED_AT=/ {
+      if (date=="") date=substr($0,13)
+      next
+    }
+    /^AUTO_ARCHIVED=true$/ {
+      is_auto=1
+      next
+    }
+    /^---WINDOWS---$/ {
+      in_windows=1
+      in_oc=0
+      next
+    }
+    /^---PANES---$/ {
+      in_windows=0
+      in_oc=0
+      next
+    }
+    /^---OPENCODE---$/ {
+      in_windows=0
+      in_oc=1
+      next
+    }
+    {
+      if (in_windows && $0 ~ /[^[:space:]]/) wins++
+      if (in_oc) {
+        widx=$1
+        sid=$3
+        title=$4
+        if (widx != "") {
+          oc_count++
+          if (sid == "") sid_missing++
+          if (oc_title == "" && title != "") oc_title=title
+          if (oc_sid == "" && sid != "") oc_sid=sid
+        }
+      }
+    }
+    END {
+      emit_current()
+    }
+  ' "${files[@]}"
+}
+
 # ── UUID group aggregation ──────────────────────────────────────────────────
 _tmux_archive_groups() {
-  setopt local_options nonomatch typeset_silent
-  for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
-    [ ! -f "$f" ] && continue
-    local meta=$(_tmux_archive_meta "$f")
-    printf '%s\n' "$meta"
-  done | awk -F'|' '
-    NF>=9 {
-      uuid=$1; name=$2; date=$3; is_auto=$4; oc_cnt=$6; sid_miss=$7
+  _tmux_archive_meta_bulk | awk -F'|' '
+    NF>=10 {
+      uuid=$2; name=$3; date=$4; is_auto=$5; oc_cnt=$7; sid_miss=$8
       count[uuid]++
       if (is_auto+0 > 0) auto_count[uuid]++
       oc_total[uuid]+=oc_cnt+0
@@ -100,11 +266,8 @@ _tmux_archive_groups() {
 _tmux_archives_for_uuid() {
   local target_uuid="$1"
   [ -z "$target_uuid" ] && return 1
-  while IFS= read -r f; do
+  _tmux_archive_meta_bulk | sort -t'|' -k4 -r | while IFS='|' read -r f uuid name date is_auto wins oc_count sid_missing oc_title oc_sid; do
     [ -z "$f" ] && continue
-    local meta=$(_tmux_archive_meta "$f")
-    local uuid='' name='' date='' is_auto='' wins='' oc_count='' sid_missing='' oc_title='' oc_sid=''
-    IFS='|' read -r uuid name date is_auto wins oc_count sid_missing oc_title oc_sid <<< "$meta"
     if [ "$uuid" = "$target_uuid" ]; then
       local tag=''
       [ "$is_auto" -gt 0 ] 2>/dev/null && tag=' [auto]'
@@ -114,7 +277,7 @@ _tmux_archives_for_uuid() {
       fi
       printf '%s|%s  %s  \033[90m%sw\033[0m%s\n' "$f" "$name" "$date" "$wins" "$tag"
     fi
-  done < <(ls -1t "$TMUX_ARCHIVE_DIR"/*.archive 2>/dev/null)
+  done
 }
 
 # ── Build group preview cache for fzf ───────────────────────────────────────
@@ -122,11 +285,8 @@ _tmux_build_group_preview_cache() {
   local cache_file=$(mktemp -t tmux_group_preview)
   [ -z "$cache_file" ] && return 1
   typeset -A shown
-  while IFS= read -r f; do
+  _tmux_archive_meta_bulk | sort -t'|' -k4 -r | while IFS='|' read -r f uuid name date is_auto wins oc_count sid_missing oc_title oc_sid; do
     [ -z "$f" ] && continue
-    local meta=$(_tmux_archive_meta "$f")
-    local uuid='' name='' date='' is_auto='' wins='' oc_count='' sid_missing='' oc_title='' oc_sid=''
-    IFS='|' read -r uuid name date is_auto wins oc_count sid_missing oc_title oc_sid <<< "$meta"
     [ -z "$uuid" ] && uuid='_legacy'
     local n=${shown[$uuid]:-0}
     [ "$n" -ge 10 ] && continue
@@ -143,7 +303,7 @@ _tmux_build_group_preview_cache() {
     fi
     printf '%s|%s  %s  %sw%s%s\n' "$uuid" "$name" "$date" "$wins" "$tag" "$title_hint" >> "$cache_file"
     shown[$uuid]=$((n + 1))
-  done < <(ls -1t "$TMUX_ARCHIVE_DIR"/*.archive 2>/dev/null)
+  done
   echo "$cache_file"
 }
 
@@ -357,25 +517,20 @@ tmux-archive() {
       _tmux_archive_restore "$2"
       ;;
     list)
-      if [ ! -d "$TMUX_ARCHIVE_DIR" ] || [ -z "$(ls -A "$TMUX_ARCHIVE_DIR" 2>/dev/null)" ]; then
+      local files=("$TMUX_ARCHIVE_DIR"/*.archive(N))
+      if [ ! -d "$TMUX_ARCHIVE_DIR" ] || [ "${#files[@]}" -eq 0 ]; then
         echo "\033[90m아카이브 없음\033[0m"; return
       fi
       echo '\033[1;36m━━━ tmux 아카이브 목록 ━━━\033[0m'
       echo ''
-      for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
-        local name=$(_tmux_af_header_get "$f" SESSION_NAME)
-        local date=$(_tmux_af_header_get "$f" ARCHIVED_AT)
-        local wins
-        wins=$(_tmux_af_section_lines "$f" '---WINDOWS---' '---PANES---' | grep -c '[^[:space:]]' 2>/dev/null)
+      _tmux_archive_meta_bulk | sort -t'|' -k4 -r | while IFS='|' read -r f uuid name date is_auto wins oc_count sid_missing oc_title oc_sid; do
         printf '  \033[36m%-18s\033[0m  %s  \033[90m%sw\033[0m\n' "$name" "$date" "$wins"
       done
       ;;
     delete)
       local file="$2"
       if [ -z "$file" ]; then
-        file=$(ls -1 "$TMUX_ARCHIVE_DIR"/*.archive 2>/dev/null | while read -r f; do
-          local name=$(_tmux_af_header_get "$f" SESSION_NAME)
-          local date=$(_tmux_af_header_get "$f" ARCHIVED_AT)
+        file=$(_tmux_archive_meta_bulk | sort -t'|' -k4 -r | while IFS='|' read -r f uuid name date is_auto wins oc_count sid_missing oc_title oc_sid; do
           printf '%s|%s  %s\n' "$f" "$name" "$date"
         done | fzf --height=50% --reverse --header='삭제할 아카이브 선택' -d'|' --with-nth=2 | cut -d'|' -f1)
         [ -z "$file" ] && return
