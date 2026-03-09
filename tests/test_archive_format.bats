@@ -159,3 +159,22 @@ EOF
 
   rm -rf "$fakebin"
 }
+
+@test "archive fallback escape matches v2 percent encoding for delimiters and slash" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    _tmux_af_has_python3() { return 1; }
+    raw='a|b%/c d'
+    _tmux_af_escape \"\$raw\"
+  ")
+  [ "$result" = "a%7Cb%25%2Fc%20d" ]
+}
+
+@test "archive fallback unescape decodes percent bytes and keeps malformed literals" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    _tmux_af_has_python3() { return 1; }
+    _tmux_af_unescape 'a%7Cb%25%2Fc%20d%ZZ'
+  ")
+  [ "$result" = "a|b%/c d%ZZ" ]
+}

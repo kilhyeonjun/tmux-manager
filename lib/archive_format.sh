@@ -25,11 +25,38 @@ _tmux_af_require_python3() {
   return 1
 }
 
+_tmux_af_is_unreserved_byte() {
+  local b="$1"
+  [ -z "$b" ] && return 1
+  (( b >= 48 && b <= 57 )) && return 0
+  (( b >= 65 && b <= 90 )) && return 0
+  (( b >= 97 && b <= 122 )) && return 0
+  (( b == 45 || b == 46 || b == 95 || b == 126 )) && return 0
+  return 1
+}
+
+_tmux_af_hex_to_dec() {
+  local hex="$1"
+  [[ "$hex" == [0-9A-Fa-f][0-9A-Fa-f] ]] || return 1
+  echo $((16#$hex))
+}
+
 _tmux_af_escape() {
   local s="$1"
   s="${s//$'\r'/}"
   if ! _tmux_af_has_python3; then
-    printf '%s' "$s"
+    local out='' hex byte dec
+    while IFS= read -r hex; do
+      [ -z "$hex" ] && continue
+      dec=$((16#$hex))
+      if _tmux_af_is_unreserved_byte "$dec"; then
+        byte=$(printf "\\$(printf '%03o' "$dec")")
+        out+="$byte"
+      else
+        out+="%${hex}"
+      fi
+    done < <(printf '%s' "$s" | LC_ALL=C hexdump -v -e '/1 "%02X\n"')
+    printf '%s' "$out"
     return 0
   fi
   printf '%s' "$s" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=""), end="")'
@@ -38,7 +65,22 @@ _tmux_af_escape() {
 _tmux_af_unescape() {
   local s="$1"
   if ! _tmux_af_has_python3; then
-    printf '%s' "$s"
+    local out='' i=1 len=${#s} ch hex dec byte
+    while [ "$i" -le "$len" ]; do
+      ch="${s:$((i-1)):1}"
+      if [ "$ch" = '%' ] && [ $((i + 2)) -le "$len" ]; then
+        hex="${s:$i:2}"
+        if dec=$(_tmux_af_hex_to_dec "$hex"); then
+          byte=$(printf "\\$(printf '%03o' "$dec")")
+          out+="$byte"
+          i=$((i + 3))
+          continue
+        fi
+      fi
+      out+="$ch"
+      i=$((i + 1))
+    done
+    printf '%s' "$out"
     return 0
   fi
   printf '%s' "$s" | python3 -c 'import sys,urllib.parse; print(urllib.parse.unquote(sys.stdin.read()), end="")'

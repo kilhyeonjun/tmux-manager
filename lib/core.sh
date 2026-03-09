@@ -248,8 +248,6 @@ _tmux_archive_save_unlocked() {
   local session="$1"
   local auto_mode="$2"
 
-  _tmux_af_require_python3 'FORMAT_VERSION=2 아카이브 저장' || return 1
-
   local uuid
   uuid=$(_tmux_ensure_uuid "$session") || return 1
   local ts

@@ -41,7 +41,11 @@ _tmux_archive_lock_acquire() {
   local lockdir
   lockdir=$(_tmux_archive_lock_dir)
   local waited=0
-  local stale_after=300
+  local stale_after="${TMUX_MANAGER_LOCK_STALE_AFTER:-300}"
+  case "$stale_after" in
+    ''|*[!0-9]*) stale_after=300 ;;
+  esac
+  [ "$stale_after" -lt 1 ] 2>/dev/null && stale_after=300
 
   while ! mkdir "$lockdir" 2>/dev/null; do
     local created_at_file="$lockdir/created_at"

@@ -114,6 +114,8 @@ _tmux_oc_capture_session() {
 _tmux_oc_enrich_meta() {
   local sid="$1" title_var="$2" dir_var="$3"
   [ -z "$sid" ] && return 1
+  [[ "$title_var" == [a-zA-Z_][a-zA-Z0-9_]* ]] || return 1
+  [[ "$dir_var" == [a-zA-Z_][a-zA-Z0-9_]* ]] || return 1
   local oc_meta=$(opencode export "$sid" 2>/dev/null | python3 -c \
     'import sys,json; d=json.load(sys.stdin).get("info",{}); t=d.get("title","").replace("|","/"); p=d.get("directory",""); print(t); print(p)' 2>/dev/null)
   if [ -n "$oc_meta" ]; then

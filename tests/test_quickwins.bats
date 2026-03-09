@@ -42,3 +42,8 @@ load helpers/setup
   run grep -n 'safe_name=\$(_tmux_archive_safe_name "\$sess_name")' "$TMUX_MANAGER_DIR/lib/status.sh"
   [ "$status" -eq 0 ]
 }
+
+@test "archive save path does not hard-require python3" {
+  run grep -n '_tmux_af_require_python3.*아카이브 저장' "$TMUX_MANAGER_DIR/lib/core.sh"
+  [ "$status" -ne 0 ]
+}
