@@ -139,3 +139,23 @@ EOF
   ")
   [ "$result" = "bad%ZZvalue/ok" ]
 }
+
+@test "archive format v2 requires working python3 runtime" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_fake_python)
+  cat > "$fakebin/python3" << 'EOF'
+#!/usr/bin/env bash
+exit 127
+EOF
+  chmod +x "$fakebin/python3"
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    _tmux_af_require_python3 'v2 test'
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"python3"* ]]
+
+  rm -rf "$fakebin"
+}

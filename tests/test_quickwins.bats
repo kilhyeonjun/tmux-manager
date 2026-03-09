@@ -23,3 +23,22 @@ load helpers/setup
   run grep -n 'tmux send-keys -t "\$pane_target" "cd -- \$qpath" Enter' "$TMUX_MANAGER_DIR/lib/restore.sh"
   [ "$status" -eq 0 ]
 }
+
+@test "mutation paths are protected by archive lock helper" {
+  run grep -n '_tmux_archive_with_lock 30 _tmux_archive_save_unlocked' "$TMUX_MANAGER_DIR/lib/core.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -n '_tmux_archive_with_lock 60 _tmux_autoarchive_cleanup_unlocked' "$TMUX_MANAGER_DIR/lib/core.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -n '_tmux_archive_with_lock 60 _tmux_archive_restore_unlocked' "$TMUX_MANAGER_DIR/lib/restore.sh"
+  [ "$status" -eq 0 ]
+}
+
+@test "archive save and status use shared safe-name sanitizer" {
+  run grep -n 'safe_name=\$(_tmux_archive_safe_name "\$session")' "$TMUX_MANAGER_DIR/lib/core.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -n 'safe_name=\$(_tmux_archive_safe_name "\$sess_name")' "$TMUX_MANAGER_DIR/lib/status.sh"
+  [ "$status" -eq 0 ]
+}

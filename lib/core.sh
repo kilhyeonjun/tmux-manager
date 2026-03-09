@@ -4,6 +4,9 @@
 if ! typeset -f _tmux_af_format_version > /dev/null 2>&1; then
   source "$TMUX_MANAGER_DIR/lib/archive_format.sh" 2>/dev/null
 fi
+if ! typeset -f _tmux_archive_with_lock > /dev/null 2>&1; then
+  source "$TMUX_MANAGER_DIR/lib/utils.sh" 2>/dev/null
+fi
 
 # ── UUID helper ─────────────────────────────────────────────────────────────
 _tmux_ensure_uuid() {
@@ -18,13 +21,17 @@ _tmux_ensure_uuid() {
 }
 
 # ── Single archive file + .pane deletion ────────────────────────────────────
-_tmux_archive_delete_file() {
+_tmux_archive_delete_file_unlocked() {
   local file="$1"
   [ ! -f "$file" ] && return 1
   local name=$(_tmux_af_header_get "$file" SESSION_NAME)
   local fbase="${file%.archive}"
   rm -f "${fbase}"_w*_p*.pane 2>/dev/null
   rm -f "$file" && echo "\033[31m✓ 삭제: $name\033[0m"
+}
+
+_tmux_archive_delete_file() {
+  _tmux_archive_with_lock 10 _tmux_archive_delete_file_unlocked "$1"
 }
 
 # ── Archive metadata parser ─────────────────────────────────────────────────
@@ -143,7 +150,7 @@ _tmux_build_group_preview_cache() {
 }
 
 # ── UUID group deletion ─────────────────────────────────────────────────────
-_tmux_archive_delete_group() {
+_tmux_archive_delete_group_unlocked() {
   local target_uuid="$1"
   [ -z "$target_uuid" ] && return 1
   local deleted=0
@@ -161,6 +168,10 @@ _tmux_archive_delete_group() {
   echo "\033[31m✓ 그룹 삭제: ${deleted}개 아카이브\033[0m"
 }
 
+_tmux_archive_delete_group() {
+  _tmux_archive_with_lock 20 _tmux_archive_delete_group_unlocked "$1"
+}
+
 # ── Auto-archive all active sessions ────────────────────────────────────────
 _tmux_autoarchive_all() {
   mkdir -p "$TMUX_ARCHIVE_DIR"
@@ -173,7 +184,7 @@ _tmux_autoarchive_all() {
 }
 
 # ── Auto-archive cleanup (per-UUID max + optional age limit) ────────────────
-_tmux_autoarchive_cleanup() {
+_tmux_autoarchive_cleanup_unlocked() {
   [ "$TMUX_ARCHIVE_AUTO_CLEANUP" != '1' ] && return
   setopt local_options nonomatch
   local now=$(date +%s)
@@ -228,6 +239,94 @@ _tmux_autoarchive_cleanup() {
   done <<< "$uuids"
 }
 
+_tmux_autoarchive_cleanup() {
+  _tmux_archive_with_lock 60 _tmux_autoarchive_cleanup_unlocked
+}
+
+_tmux_archive_save_unlocked() {
+  setopt local_options pipefail
+  local session="$1"
+  local auto_mode="$2"
+
+  _tmux_af_require_python3 'FORMAT_VERSION=2 아카이브 저장' || return 1
+
+  local uuid
+  uuid=$(_tmux_ensure_uuid "$session") || return 1
+  local ts
+  ts=$(date +%Y%m%d_%H%M%S)
+  local safe_name
+  safe_name=$(_tmux_archive_safe_name "$session")
+  local file="$TMUX_ARCHIVE_DIR/${safe_name}_${ts}.archive"
+  local escaped_session
+  escaped_session=$(_tmux_af_escape "$session")
+  local tmp_file
+  tmp_file=$(mktemp "${TMUX_ARCHIVE_DIR}/.${safe_name}_${ts}.XXXXXX.tmp") || {
+    echo "\033[31m아카이브 임시 파일 생성 실패\033[0m"
+    return 1
+  }
+
+  if ! {
+    echo "FORMAT_VERSION=2"
+    echo "SESSION_NAME=$escaped_session"
+    echo "SESSION_UUID=$uuid"
+    echo "ARCHIVED_AT=$(date '+%Y-%m-%d %H:%M:%S')"
+    if [ "$auto_mode" = 'auto' ]; then
+      echo "AUTO_ARCHIVED=true"
+      echo "SCROLLBACK_MODE=recent"
+      echo "SCROLLBACK_LINES=$TMUX_ARCHIVE_AUTO_SCROLLBACK_LINES"
+    else
+      echo "SCROLLBACK_MODE=full"
+    fi
+    echo "---WINDOWS---"
+    tmux list-windows -t "$session" -F "#{window_index}$(printf '\t')#{window_name}$(printf '\t')#{window_layout}" 2>/dev/null | while IFS=$'\t' read -r widx wname wlayout; do
+      printf '%s|%s|%s\n' "$widx" "$(_tmux_af_escape "$wname")" "$(_tmux_af_escape "$wlayout")"
+    done
+    echo "---PANES---"
+    tmux list-panes -t "$session" -F "#{session_name}$(printf '\t')#{window_index}$(printf '\t')#{pane_index}$(printf '\t')#{pane_current_path}$(printf '\t')#{pane_current_command}$(printf '\t')#{pane_title}" 2>/dev/null | while IFS=$'\t' read -r sn widx pidx ppath pcmd ptitle; do
+      printf '%s|%s|%s|%s|%s|%s\n' \
+        "$(_tmux_af_escape "$sn")" "$widx" "$pidx" \
+        "$(_tmux_af_escape "$ppath")" "$(_tmux_af_escape "$pcmd")" "$(_tmux_af_escape "$ptitle")"
+    done
+  } > "$tmp_file"; then
+    rm -f "$tmp_file"
+    echo "\033[31m아카이브 저장 실패: $session\033[0m"
+    return 1
+  fi
+
+  local wins_count panes_count
+  wins_count=$(_tmux_af_section_lines "$tmp_file" '---WINDOWS---' '---PANES---' | grep -c '[^[:space:]]' 2>/dev/null)
+  panes_count=$(_tmux_af_section_lines "$tmp_file" '---PANES---' '' | grep -c '[^[:space:]]' 2>/dev/null)
+  if [ "$wins_count" -le 0 ] 2>/dev/null || [ "$panes_count" -le 0 ] 2>/dev/null; then
+    rm -f "$tmp_file"
+    echo "\033[31m아카이브 저장 실패: 필수 섹션(WINDOWS/PANES) 검증 실패\033[0m"
+    return 1
+  fi
+
+  echo "---OPENCODE---" >> "$tmp_file"
+  if typeset -f _tmux_oc_capture_session > /dev/null 2>&1; then
+    _tmux_oc_capture_session "$session" "$tmp_file" "${file%.archive}"
+  fi
+  if ! mv -f "$tmp_file" "$file"; then
+    rm -f "$tmp_file"
+    echo "\033[31m아카이브 파일 finalize 실패: $session\033[0m"
+    return 1
+  fi
+
+  local base="${file%.archive}"
+  local capture_start='-'
+  local auto_lines="$TMUX_ARCHIVE_AUTO_SCROLLBACK_LINES"
+  case "$auto_lines" in
+    ''|*[!0-9]*) auto_lines=200 ;;
+  esac
+  if [ "$auto_mode" = 'auto' ]; then
+    capture_start="-${auto_lines}"
+  fi
+  tmux list-panes -t "$session" -F '#{window_index}|#{pane_index}' 2>/dev/null | while IFS='|' read -r _widx _pidx; do
+    tmux capture-pane -t "${session}:${_widx}.${_pidx}" -p -S "$capture_start" > "${base}_w${_widx}_p${_pidx}.pane" 2>/dev/null
+  done
+  [ "$auto_mode" != 'auto' ] && echo "\033[32m✓ 아카이브 저장: $session → $file\033[0m"
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  tmux-archive CLI
 # ═══════════════════════════════════════════════════════════════════════════
@@ -245,67 +344,7 @@ tmux-archive() {
       if ! tmux has-session -t "$session" 2>/dev/null; then
         echo "\033[31m세션 '$session' 없음\033[0m"; return 1
       fi
-      local uuid=$(_tmux_ensure_uuid "$session")
-      local ts=$(date +%Y%m%d_%H%M%S)
-      local safe_name=$(echo "$session" | tr ' ' '_')
-      local file="$TMUX_ARCHIVE_DIR/${safe_name}_${ts}.archive"
-      local escaped_session
-      escaped_session=$(_tmux_af_escape "$session")
-      local tmp_file
-      tmp_file=$(mktemp "${TMUX_ARCHIVE_DIR}/.${safe_name}_${ts}.XXXXXX.tmp") || {
-        echo "\033[31m아카이브 임시 파일 생성 실패\033[0m"; return 1
-      }
-      if ! {
-        echo "FORMAT_VERSION=2"
-        echo "SESSION_NAME=$escaped_session"
-        echo "SESSION_UUID=$uuid"
-        echo "ARCHIVED_AT=$(date '+%Y-%m-%d %H:%M:%S')"
-        if [ "$auto_mode" = 'auto' ]; then
-          echo "AUTO_ARCHIVED=true"
-          echo "SCROLLBACK_MODE=recent"
-          echo "SCROLLBACK_LINES=$TMUX_ARCHIVE_AUTO_SCROLLBACK_LINES"
-        else
-          echo "SCROLLBACK_MODE=full"
-        fi
-        echo "---WINDOWS---"
-        tmux list-windows -t "$session" -F "#{window_index}$(printf '\t')#{window_name}$(printf '\t')#{window_layout}" 2>/dev/null | while IFS=$'\t' read -r widx wname wlayout; do
-          printf '%s|%s|%s\n' "$widx" "$(_tmux_af_escape "$wname")" "$(_tmux_af_escape "$wlayout")"
-        done
-        echo "---PANES---"
-        tmux list-panes -t "$session" -F "#{session_name}$(printf '\t')#{window_index}$(printf '\t')#{pane_index}$(printf '\t')#{pane_current_path}$(printf '\t')#{pane_current_command}$(printf '\t')#{pane_title}" 2>/dev/null | while IFS=$'\t' read -r sn widx pidx ppath pcmd ptitle; do
-          printf '%s|%s|%s|%s|%s|%s\n' \
-            "$(_tmux_af_escape "$sn")" "$widx" "$pidx" \
-            "$(_tmux_af_escape "$ppath")" "$(_tmux_af_escape "$pcmd")" "$(_tmux_af_escape "$ptitle")"
-        done
-      } > "$tmp_file"; then
-        rm -f "$tmp_file"
-        echo "\033[31m아카이브 저장 실패: $session\033[0m"
-        return 1
-      fi
-      # Plugin hook: capture OpenCode sessions
-      echo "---OPENCODE---" >> "$tmp_file"
-      if typeset -f _tmux_oc_capture_session > /dev/null 2>&1; then
-        _tmux_oc_capture_session "$session" "$tmp_file" "${file%.archive}"
-      fi
-      if ! mv -f "$tmp_file" "$file"; then
-        rm -f "$tmp_file"
-        echo "\033[31m아카이브 파일 finalize 실패: $session\033[0m"
-        return 1
-      fi
-      # Capture scrollback
-      local base="${file%.archive}"
-      local capture_start='-'
-      local auto_lines="$TMUX_ARCHIVE_AUTO_SCROLLBACK_LINES"
-      case "$auto_lines" in
-        ''|*[!0-9]*) auto_lines=200 ;;
-      esac
-      if [ "$auto_mode" = 'auto' ]; then
-        capture_start="-${auto_lines}"
-      fi
-      tmux list-panes -t "$session" -F '#{window_index}|#{pane_index}' 2>/dev/null | while IFS='|' read -r _widx _pidx; do
-        tmux capture-pane -t "${session}:${_widx}.${_pidx}" -p -S "$capture_start" > "${base}_w${_widx}_p${_pidx}.pane" 2>/dev/null
-      done
-      [ "$auto_mode" != 'auto' ] && echo "\033[32m✓ 아카이브 저장: $session → $file\033[0m"
+      _tmux_archive_with_lock 30 _tmux_archive_save_unlocked "$session" "$auto_mode"
       ;;
     save-and-kill)
       local session="$2"

@@ -11,14 +11,36 @@ _tmux_af_format_version() {
   esac
 }
 
+_tmux_af_has_python3() {
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 -c 'import urllib.parse' >/dev/null 2>&1
+}
+
+_tmux_af_require_python3() {
+  local context="${1:-아카이브 포맷 v2}"
+  if _tmux_af_has_python3; then
+    return 0
+  fi
+  echo "\033[31m${context}에는 python3가 필요합니다\033[0m" >&2
+  return 1
+}
+
 _tmux_af_escape() {
   local s="$1"
   s="${s//$'\r'/}"
+  if ! _tmux_af_has_python3; then
+    printf '%s' "$s"
+    return 0
+  fi
   printf '%s' "$s" | python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=""), end="")'
 }
 
 _tmux_af_unescape() {
   local s="$1"
+  if ! _tmux_af_has_python3; then
+    printf '%s' "$s"
+    return 0
+  fi
   printf '%s' "$s" | python3 -c 'import sys,urllib.parse; print(urllib.parse.unquote(sys.stdin.read()), end="")'
 }
 

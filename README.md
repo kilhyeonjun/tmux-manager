@@ -20,6 +20,7 @@ Archive your tmux sessions — windows, panes, scrollback, layouts — and resto
 - **zsh** (primary shell)
 - **tmux** ≥ 3.2
 - **fzf** — interactive selection UI
+- **python3** — required for archive format v2 field encoding/decoding
 - **macOS** (primary target; Linux should work but is untested)
 
 ## Installation
@@ -149,9 +150,10 @@ source ~/tmux-manager/init.sh
 
 ## Archive File Format
 
-Archives are plain text files with `|`-delimited fields:
+Archives are plain text files with `|`-delimited fields. For `FORMAT_VERSION=2`, string fields are URL-encoded to preserve delimiters safely:
 
 ```
+FORMAT_VERSION=2
 SESSION_NAME=my-project
 SESSION_UUID=XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
 ARCHIVED_AT=2025-02-26 20:30:00
@@ -225,6 +227,7 @@ tmux-manager/
 ├── lib/
 │   ├── utils.sh               # Common utilities
 │   ├── metrics.sh             # BFS process tree CPU/MEM metrics
+│   ├── archive_format.sh      # Archive format/version/escape helpers
 │   ├── core.sh                # Archive CRUD, groups, fzf manager UI
 │   ├── restore.sh             # Session restore logic
 │   ├── status.sh              # Status bar refresh (standalone, called by tmux)
@@ -238,8 +241,14 @@ tmux-manager/
 │   └── autoarchive.sh         # Cron/LaunchAgent script
 └── tests/
     ├── helpers/setup.bash     # Test fixtures
+    ├── test_archive_format.bats # Archive format helper tests
     ├── test_core.bats         # Core function tests
+    ├── test_integration_tmux.bats # tmux integration restore tests
     ├── test_metrics.bats      # Metrics tests
+    ├── test_opencode.bats     # OpenCode plugin tests
+    ├── test_preview.bats      # Preview rendering tests
+    ├── test_quickwins.bats    # Structural hardening regressions
+    ├── test_spacing_regression.bats # zsh spacing regression tests
     └── test_status.bats       # Status + validation tests
 ```
 

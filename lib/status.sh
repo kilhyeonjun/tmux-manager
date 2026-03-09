@@ -5,6 +5,7 @@
 
 TMUX_MANAGER_DIR="${0:A:h:h}"
 source "$TMUX_MANAGER_DIR/conf/defaults.conf"
+source "$TMUX_MANAGER_DIR/lib/utils.sh"
 
 segment="$1"
 shift
@@ -144,7 +145,7 @@ case "$segment" in
 
       # Archive age
       local sess_name=$(tmux display-message -t "$sid" -p '#{session_name}' 2>/dev/null)
-      local safe_name=$(echo "$sess_name" | tr ' ' '_')
+      local safe_name=$(_tmux_archive_safe_name "$sess_name")
       local latest=$(ls -1t "$TMUX_ARCHIVE_DIR/${safe_name}_"*.archive 2>/dev/null | head -1)
       if [ -n "$latest" ]; then
         local fdate=$(grep '^ARCHIVED_AT=' "$latest" | cut -d= -f2-)

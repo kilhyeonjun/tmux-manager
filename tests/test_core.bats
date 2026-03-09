@@ -439,3 +439,24 @@ EOF
   [[ "$result" == *"my project (v2)"* ]]
   [[ "$result" == *"special-uuid"* ]]
 }
+
+@test "archive_safe_name normalizes unsafe characters" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    _tmux_archive_safe_name '../my session|name*'
+  ")
+  [ "$result" = "my_session_name" ]
+}
+
+@test "archive lock times out when lock directory is held" {
+  run zsh -c "
+    export TMUX_ARCHIVE_DIR='$TMUX_ARCHIVE_DIR'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    lockdir=\$(_tmux_archive_lock_dir)
+    mkdir -p \"\$lockdir\"
+    date +%s > \"\$lockdir/created_at\"
+    _tmux_archive_with_lock 1 true
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"락 획득 실패"* ]]
+}

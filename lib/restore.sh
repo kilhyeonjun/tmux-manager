@@ -1,8 +1,15 @@
 if ! typeset -f _tmux_af_format_version > /dev/null 2>&1; then
   source "$TMUX_MANAGER_DIR/lib/archive_format.sh" 2>/dev/null
 fi
+if ! typeset -f _tmux_archive_with_lock > /dev/null 2>&1; then
+  source "$TMUX_MANAGER_DIR/lib/utils.sh" 2>/dev/null
+fi
 
 _tmux_archive_restore() {
+  _tmux_archive_with_lock 60 _tmux_archive_restore_unlocked "$@"
+}
+
+_tmux_archive_restore_unlocked() {
   setopt local_options typeset_silent
   local file="$1"
   if [ -z "$file" ]; then
@@ -23,6 +30,9 @@ _tmux_archive_restore() {
 
   local fmt
   fmt=$(_tmux_af_format_version "$file")
+  if [ "$fmt" -ge 2 ] 2>/dev/null; then
+    _tmux_af_require_python3 'FORMAT_VERSION=2 아카이브 복원' || return 1
+  fi
   local session_name
   session_name=$(_tmux_af_header_get "$file" SESSION_NAME)
   if [ -z "$session_name" ]; then
