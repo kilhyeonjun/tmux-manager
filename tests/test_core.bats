@@ -485,3 +485,45 @@ EOF
   [[ "$output" == *"list-check"* ]]
   [[ "$output" != *"wins="* ]]
 }
+
+@test "new-session form defaults to main on empty input" {
+  result=$(printf '\n' | zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    _tmux_prompt_new_session_name
+  ")
+  [ "$result" = "main" ]
+}
+
+@test "new-session form keeps explicit input" {
+  result=$(printf 'feature-x\n' | zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    _tmux_prompt_new_session_name
+  ")
+  [ "$result" = "feature-x" ]
+}
+
+@test "rename form returns empty on enter and value on input" {
+  empty=$(printf '\n' | zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    _tmux_prompt_rename_session_name 'old-name'
+  ")
+  [ -z "$empty" ]
+
+  value=$(printf 'new-name\n' | zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    _tmux_prompt_rename_session_name 'old-name'
+  ")
+  [ "$value" = "new-name" ]
+}

@@ -756,6 +756,19 @@ _tmux_archive_save_flow() {
 # ═══════════════════════════════════════════════════════════════════════════
 #  Main session manager (fzf)
 # ═══════════════════════════════════════════════════════════════════════════
+_tmux_prompt_new_session_name() {
+  local name
+  read -r 'name?새 세션 이름 (Enter=main): '
+  echo "${name:-main}"
+}
+
+_tmux_prompt_rename_session_name() {
+  local current="$1"
+  local newname
+  read -r "newname?새 세션 이름 (Enter=유지: ${current}): "
+  echo "$newname"
+}
+
 tmux-manager() {
   setopt local_options nonomatch typeset_silent
   local archive_count=$(print -rl -- "$TMUX_ARCHIVE_DIR"/*.archive(N) | wc -l | tr -d ' ')
@@ -776,8 +789,8 @@ tmux-manager() {
       case "$opt" in
         1)
           local name
-          read -r 'name?세션 이름 (Enter=main): '
-          tmux new -s "${name:-main}"
+          name=$(_tmux_prompt_new_session_name)
+          tmux new -s "$name"
           ;;
         2) _tmux_archive_manager ;;
         *) return ;;
@@ -785,8 +798,8 @@ tmux-manager() {
     else
       echo ''
       local name
-      read -r 'name?새 세션 이름 (Enter=main): '
-      tmux new -s "${name:-main}"
+      name=$(_tmux_prompt_new_session_name)
+      tmux new -s "$name"
     fi
     return
   fi
@@ -861,13 +874,12 @@ tmux-manager() {
     choice=$(echo "$session" | tail -1 | cut -d'|' -f1)
     if [ "$key" = 'ctrl-n' ]; then
       local name
-      read -r 'name?새 세션 이름: '
-      tmux new -s "${name:-$(date +%H%M%S)}"
+      name=$(_tmux_prompt_new_session_name)
+      tmux new -s "$name"
       return
     elif [ "$key" = 'ctrl-r' ] && [ -n "$choice" ]; then
-      echo -n "\033[35m$choice → \033[0m"
       local newname
-      read -r newname
+      newname=$(_tmux_prompt_rename_session_name "$choice")
       if [ -n "$newname" ]; then
         tmux rename-session -t "$choice" "$newname" 2>/dev/null && \
           echo "\033[35m$choice → $newname\033[0m" || \
