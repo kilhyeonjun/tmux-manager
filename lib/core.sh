@@ -550,7 +550,7 @@ tmux-archive() {
         session=$(tmux ls -F '#{session_name}' 2>/dev/null | fzf --height=40% --reverse --header='아카이브할 세션 선택')
         [ -z "$session" ] && return
       fi
-      if ! tmux has-session -t "$session" 2>/dev/null; then
+      if ! tmux has-session -t "=$session" 2>/dev/null; then
         echo "\033[31m세션 '$session' 없음\033[0m"; return 1
       fi
       _tmux_archive_with_lock 30 _tmux_archive_save_unlocked "$session" "$auto_mode"
@@ -562,7 +562,7 @@ tmux-archive() {
         [ -z "$session" ] && return
       fi
       tmux-archive save "$session" || return 1
-      tmux kill-session -t "$session" 2>/dev/null && \
+      tmux kill-session -t "=$session" 2>/dev/null && \
         echo "\033[33m✓ 세션 종료됨: $session\033[0m"
       ;;
     restore)
@@ -623,7 +623,7 @@ tmux-archive() {
           continue
         fi
         local sname=$(_tmux_af_header_get "$latest" SESSION_NAME)
-        if tmux has-session -t "$sname" 2>/dev/null; then
+        if tmux has-session -t "=$sname" 2>/dev/null; then
           echo "  \033[33m⊘ 스킵\033[0m  $sname (이미 존재)"
           skipped=$((skipped + 1))
           continue
@@ -823,7 +823,7 @@ _tmux_archive_level2() {
     elif [ -n "$achoice" ]; then
       local session_name
       session_name=$(_tmux_af_header_get "$achoice" SESSION_NAME)
-      if tmux has-session -t "$session_name" 2>/dev/null; then
+      if tmux has-session -t "=$session_name" 2>/dev/null; then
         echo "\033[31m세션 '$session_name' 이미 존재. 다른 이름으로 복원할까요?\033[0m"
         local rname
         read -r 'rname?새 이름 (빈값=취소): '
@@ -865,7 +865,7 @@ _tmux_archive_save_flow() {
   local kill_confirm
   read -r kill_confirm
   if [ "$kill_confirm" = 'y' ] || [ "$kill_confirm" = 'Y' ]; then
-    tmux kill-session -t "$session" 2>/dev/null && echo "\033[33m$session 종료됨\033[0m"
+    tmux kill-session -t "=$session" 2>/dev/null && echo "\033[33m$session 종료됨\033[0m"
   fi
   sleep 0.5
 }
@@ -899,8 +899,20 @@ tmux-manager() {
     echo '  \033[90m활성 세션 없음\033[0m'
     if [ "$archive_count" -gt 0 ] 2>/dev/null; then
       echo "  \033[34m아카이브 ${archive_count}개 있음\033[0m"
+      local manifest="$TMUX_ARCHIVE_DIR/.last-active"
+      local has_manifest=false
+      local manifest_count=0
+      if [ -f "$manifest" ]; then
+        manifest_count=$(grep -cv '^#\|^$' "$manifest" 2>/dev/null)
+        [ "$manifest_count" -gt 0 ] 2>/dev/null && has_manifest=true
+      fi
       echo ''
-      echo '  \033[32m1\033[0m 새 세션 생성  \033[34m2\033[0m 아카이브 매니저  \033[90m3\033[0m 취소'
+      if [ "$has_manifest" = true ]; then
+        local manifest_date=$(head -1 "$manifest" | sed 's/^# //')
+        echo "  \033[32m1\033[0m 새 세션 생성  \033[34m2\033[0m 아카이브 매니저  \033[33m3\033[0m 마지막 세션 복원 (${manifest_count}개, ${manifest_date})  \033[90m4\033[0m 취소"
+      else
+        echo '  \033[32m1\033[0m 새 세션 생성  \033[34m2\033[0m 아카이브 매니저  \033[90m3\033[0m 취소'
+      fi
       echo ''
       local opt
       read -r 'opt?선택: '
@@ -911,6 +923,13 @@ tmux-manager() {
           tmux new -s "$name"
           ;;
         2) _tmux_archive_manager ;;
+        3)
+          if [ "$has_manifest" = true ]; then
+            tmux-archive restore-last
+            local first_session=$(tmux ls -F '#{session_name}' 2>/dev/null | head -1)
+            [ -n "$first_session" ] && tmux attach -t "=$first_session"
+          fi
+          ;;
         *) return ;;
       esac
     else
@@ -1012,7 +1031,7 @@ tmux-manager() {
       read -r confirm
       if [ "$confirm" = 'y' ] || [ "$confirm" = 'Y' ]; then
         if tmux-archive save "$choice" >/dev/null 2>&1; then
-          tmux kill-session -t "$choice" 2>/dev/null && echo "\033[31m$choice 삭제됨 (아카이브 저장 완료)\033[0m"
+          tmux kill-session -t "=$choice" 2>/dev/null && echo "\033[31m$choice 삭제됨 (아카이브 저장 완료)\033[0m"
         else
           echo "\033[31m아카이브 저장 실패로 삭제 취소: $choice\033[0m"
         fi

@@ -46,7 +46,7 @@ _tmux_archive_restore_unlocked() {
     return 1
   fi
 
-  if tmux has-session -t "$session_name" 2>/dev/null; then
+  if tmux has-session -t "=$session_name" 2>/dev/null; then
     echo "\033[31m세션 '$session_name' 이미 존재\033[0m"
     return 1
   fi
@@ -104,7 +104,7 @@ _tmux_archive_restore_unlocked() {
     wname=$(_tmux_af_decode_field_if_needed "$fmt" "$wname")
     tmux new-window -d -t "${session_name}:${idx}" -n "$wname" 2>/dev/null || {
       echo "\033[31m복원 실패: 윈도우 생성 실패 (${idx})\033[0m"
-      [ "$created_session" -eq 1 ] && tmux kill-session -t "$session_name" 2>/dev/null
+      [ "$created_session" -eq 1 ] && tmux kill-session -t "=$session_name" 2>/dev/null
       return 1
     }
   done <<< "$windows_sorted"
@@ -145,7 +145,7 @@ _tmux_archive_restore_unlocked() {
       if [ "$pane_seq" -gt 1 ]; then
         tmux split-window -d -t "${session_name}:${widx}" -c "$ppath" 2>/dev/null || {
           echo "\033[31m복원 실패: pane split 실패 (${widx}.${pidx})\033[0m"
-          [ "$created_session" -eq 1 ] && tmux kill-session -t "$session_name" 2>/dev/null
+          [ "$created_session" -eq 1 ] && tmux kill-session -t "=$session_name" 2>/dev/null
           return 1
         }
       fi
