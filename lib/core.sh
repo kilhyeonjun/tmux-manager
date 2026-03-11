@@ -528,9 +528,15 @@ _tmux_archive_save_unlocked() {
     capture_start="-${auto_lines}"
   fi
   tmux list-panes -t "$session" -F '#{window_index}|#{pane_index}' 2>/dev/null | while IFS='|' read -r _widx _pidx; do
-    tmux capture-pane -t "${session}:${_widx}.${_pidx}" -p -S "$capture_start" 2>/dev/null \
-      | awk '{buf[NR]=$0} /[^[:space:]]/{last=NR} END{for(i=1;i<=last;i++) print buf[i]}' \
-      > "${base}_w${_widx}_p${_pidx}.pane"
+    local _pane_dst="${base}_w${_widx}_p${_pidx}.pane"
+    local _src_file=$(tmux display-message -p -t "${session}:${_widx}.${_pidx}" '#{@archive_source_file}' 2>/dev/null)
+    if [ -n "$_src_file" ] && [ -f "$_src_file" ]; then
+      cp "$_src_file" "$_pane_dst"
+    else
+      tmux capture-pane -t "${session}:${_widx}.${_pidx}" -p -S "$capture_start" 2>/dev/null \
+        | awk '{buf[NR]=$0} /[^[:space:]]/{last=NR} END{for(i=1;i<=last;i++) print buf[i]}' \
+        > "$_pane_dst"
+    fi
   done
   [ "$auto_mode" != 'auto' ] && echo "\033[32m✓ 아카이브 저장: $session → $file\033[0m"
 }

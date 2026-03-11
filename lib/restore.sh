@@ -179,6 +179,7 @@ _tmux_archive_restore_unlocked() {
         local _trimmed=$(mktemp)
         awk '{b[NR]=$0}/[^[:space:]]/{l=NR}END{for(i=1;i<=l;i++)print b[i]}' "$pane_file" > "$_trimmed"
         tmux send-keys -t "$pane_target" " cat ${(q)_trimmed}; rm -f ${(q)_trimmed}" Enter
+        tmux set-option -p -t "$pane_target" @archive_source_file "$pane_file" 2>/dev/null
       fi
       local qpath="${(q)ppath}"
       tmux send-keys -t "$pane_target" "cd -- $qpath" Enter
