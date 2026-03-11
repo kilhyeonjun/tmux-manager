@@ -8,6 +8,25 @@ load helpers/setup
 # without an active tmux session. Interactive functions (fzf, tmux commands)
 # are not unit-testable.
 
+extract_exit_banner() {
+  local sid="$1"
+  awk -v sid="$sid" '
+    /^[[:space:]]*▄[[:space:]]*$/ { start=NR; delete blk; n=0 }
+    start { blk[++n]=$0 }
+    index($0,sid) && start { found=n; start=0 }
+    END { if(found) { printf "\n"; for(i=1;i<=found;i++) print blk[i] } }
+  '
+}
+
+append_exit_banner_if_needed() {
+  local pane_dst="$1" live_tail="$2"
+  local exit_sid
+  exit_sid=$(printf '%s' "$live_tail" | grep -oE 'Continue[[:space:]]+opencode -s ses_[A-Za-z0-9]+' | tail -1 | grep -oE 'ses_[A-Za-z0-9]+' || true)
+  if [ -n "$exit_sid" ] && ! grep -q "$exit_sid" "$pane_dst" 2>/dev/null; then
+    printf '%s' "$live_tail" | extract_exit_banner "$exit_sid" >> "$pane_dst"
+  fi
+}
+
 @test "archive_meta parses well-formed archive file" {
   local file
   file=$(create_test_archive "my-project" "abc-123-uuid")
@@ -172,6 +191,129 @@ EOF
 }
 
 # ── Edge case tests ──────────────────────────────────────────────────────
+
+@test "extract_exit_banner returns full banner for a single match" {
+  local live_tail result expected
+  live_tail=$(cat << 'EOF'
+shell prompt line
+                                   ▄
+  █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+  █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+  ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+  Session   My Chat Title
+  Continue  opencode -s ses_abc123xyz
+EOF
+)
+
+  result=$(printf '%s' "$live_tail" | extract_exit_banner "ses_abc123xyz")
+  expected=$'\n                                   ▄\n  █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█\n  █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀\n  ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀\n\n  Session   My Chat Title\n  Continue  opencode -s ses_abc123xyz'
+
+  [ "$result" = "$expected" ]
+}
+
+@test "extract_exit_banner picks only the last matching banner" {
+  local live_tail result
+  live_tail=$(cat << 'EOF'
+                                   ▄
+  █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+  █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+  ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+  Session   Old Chat
+  Continue  opencode -s ses_multi777
+random shell output
+                                   ▄
+  █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+  █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+  ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+  Session   New Chat
+  Continue  opencode -s ses_multi777
+EOF
+)
+
+  result=$(printf '%s' "$live_tail" | extract_exit_banner "ses_multi777")
+  [[ "$result" == *"Session   New Chat"* ]]
+  [[ "$result" != *"Session   Old Chat"* ]]
+}
+
+@test "extract_exit_banner outputs nothing when start marker is missing" {
+  local live_tail result
+  live_tail=$(cat << 'EOF'
+  █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+  Continue  opencode -s ses_nostart111
+EOF
+)
+
+  result=$(printf '%s' "$live_tail" | extract_exit_banner "ses_nostart111")
+  [ -z "$result" ]
+}
+
+@test "extract_exit_banner outputs nothing when SID line is missing" {
+  local live_tail result
+  live_tail=$(cat << 'EOF'
+                                   ▄
+  █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+  █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+  ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+  Session   Missing Continue
+EOF
+)
+
+  result=$(printf '%s' "$live_tail" | extract_exit_banner "ses_missing222")
+  [ -z "$result" ]
+}
+
+@test "extract_exit_banner ignores art lines that contain embedded ▄" {
+  local live_tail result
+  live_tail=$(cat << 'EOF'
+  █▀▀█ ▄ █▀▀█ █▀▀█
+  █  █ █  █ █▀▀▀
+  Continue  opencode -s ses_embedded333
+EOF
+)
+
+  result=$(printf '%s' "$live_tail" | extract_exit_banner "ses_embedded333")
+  [ -z "$result" ]
+}
+
+@test "exit banner append guard skips when SID already exists in pane file" {
+  local pane_file live_tail before after
+  pane_file="$TMUX_ARCHIVE_DIR/guard_existing_sid.pane"
+  printf 'history contains ses_guard123 already\n' > "$pane_file"
+  live_tail=$(cat << 'EOF'
+                                   ▄
+  █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+  █  █ █  █ █▀▀▀ █  █ █    █  █ █  █ █▀▀▀
+  ▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀
+
+  Session   Guarded
+  Continue  opencode -s ses_guard123
+EOF
+)
+
+  before=$(cat "$pane_file")
+  append_exit_banner_if_needed "$pane_file" "$live_tail"
+  after=$(cat "$pane_file")
+
+  [ "$after" = "$before" ]
+}
+
+@test "exit banner append handles empty live pane without output" {
+  local pane_file before after result
+  pane_file="$TMUX_ARCHIVE_DIR/guard_empty_live.pane"
+  printf 'existing pane\n' > "$pane_file"
+
+  before=$(cat "$pane_file")
+  append_exit_banner_if_needed "$pane_file" ""
+  after=$(cat "$pane_file")
+  result=$(printf '' | extract_exit_banner "ses_empty000")
+
+  [ "$after" = "$before" ]
+  [ -z "$result" ]
+}
 
 @test "archive_meta handles empty file gracefully" {
   local file="$TMUX_ARCHIVE_DIR/empty_test.archive"

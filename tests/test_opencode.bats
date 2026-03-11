@@ -25,6 +25,22 @@ EOF
   echo "$file"
 }
 
+create_tmux_send_keys_logger() {
+  local fakebin="$1"
+  cat > "$fakebin/tmux" << 'EOF'
+#!/usr/bin/env bash
+log_file="${TMUX_LOG_FILE:?}"
+if [ "$1" = "send-keys" ]; then
+  target="$3"
+  cmd="$4"
+  key="$5"
+  printf '%s|%s|%s\n' "$target" "$cmd" "$key" >> "$log_file"
+fi
+exit 0
+EOF
+  chmod +x "$fakebin/tmux"
+}
+
 @test "oc_restore_metadata parses OC entries correctly" {
   local file
   file=$(create_oc_archive "oc-meta" "oc-meta-uuid" \
@@ -123,6 +139,136 @@ EOF
   [[ "$result" == *"Real Title"* ]]
 }
 
+@test "oc_setup_restored_pane echoes archived info with SID" {
+  local fakebin log_file
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  log_file="$TMUX_ARCHIVE_DIR/oc_restore_with_sid.log"
+  : > "$log_file"
+  create_tmux_send_keys_logger "$fakebin"
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export TMUX_LOG_FILE='$log_file'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    local _TMUX_RESTORE_RUNNING_CMDS=''
+    local _TMUX_RESTORE_OC_PANES=''
+    _tmux_oc_setup_restored_pane 'sess:1' '1' '0' 'OC | My Chat' '/projects/foo' '1|0|ses_abc123|My Chat|/projects/foo' '%11'
+  "
+  [ "$status" -eq 0 ]
+
+  run grep -F "[ARCHIVED OPENCODE]" "$log_file"
+  [ "$status" -eq 0 ]
+  run grep -F "TITLE : My Chat" "$log_file"
+  [ "$status" -eq 0 ]
+  run grep -F "SID   : ses_abc123" "$log_file"
+  [ "$status" -eq 0 ]
+  run grep -F "RUN   : opencode -s ses_abc123" "$log_file"
+  [ "$status" -eq 0 ]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_setup_restored_pane echoes archived info without SID" {
+  local fakebin log_file
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  log_file="$TMUX_ARCHIVE_DIR/oc_restore_without_sid.log"
+  : > "$log_file"
+  create_tmux_send_keys_logger "$fakebin"
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export TMUX_LOG_FILE='$log_file'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    local _TMUX_RESTORE_RUNNING_CMDS=''
+    local _TMUX_RESTORE_OC_PANES=''
+    _tmux_oc_setup_restored_pane 'sess:2' '2' '0' 'OC | Detected' '/projects/bar' '2|0||Detected|/projects/bar' '%22'
+  "
+  [ "$status" -eq 0 ]
+
+  run grep -F "SID   : (없음 - 새 세션으로 시작하세요)" "$log_file"
+  [ "$status" -eq 0 ]
+  run grep -F "RUN   : opencode -c" "$log_file"
+  [ "$status" -eq 0 ]
+  run grep -F "RUN   : opencode -s" "$log_file"
+  [ "$status" -eq 1 ]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_setup_restored_pane sends cd first when OC dir differs" {
+  local fakebin log_file first_line
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  log_file="$TMUX_ARCHIVE_DIR/oc_restore_cd_diff.log"
+  : > "$log_file"
+  create_tmux_send_keys_logger "$fakebin"
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export TMUX_LOG_FILE='$log_file'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    local _TMUX_RESTORE_RUNNING_CMDS=''
+    local _TMUX_RESTORE_OC_PANES=''
+    _tmux_oc_setup_restored_pane 'sess:3' '3' '0' 'OC | CD Check' '/projects/here' '3|0|ses_cd999|CD Check|/projects/there' '%33'
+  "
+  [ "$status" -eq 0 ]
+
+  first_line=$(sed -n '1p' "$log_file")
+  [ "$first_line" = "%33|cd -- /projects/there|Enter" ]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_setup_restored_pane skips cd when OC dir matches pane path" {
+  local fakebin log_file
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  log_file="$TMUX_ARCHIVE_DIR/oc_restore_cd_same.log"
+  : > "$log_file"
+  create_tmux_send_keys_logger "$fakebin"
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export TMUX_LOG_FILE='$log_file'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    local _TMUX_RESTORE_RUNNING_CMDS=''
+    local _TMUX_RESTORE_OC_PANES=''
+    _tmux_oc_setup_restored_pane 'sess:4' '4' '0' 'OC | No CD' '/projects/same' '4|0|ses_same001|No CD|/projects/same' '%44'
+  "
+  [ "$status" -eq 0 ]
+
+  run grep -F "cd -- " "$log_file"
+  [ "$status" -eq 1 ]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_setup_restored_pane decodes v2 encoded fields before echo" {
+  local fakebin log_file
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  log_file="$TMUX_ARCHIVE_DIR/oc_restore_v2_decode.log"
+  : > "$log_file"
+  create_tmux_send_keys_logger "$fakebin"
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export TMUX_LOG_FILE='$log_file'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    local _TMUX_RESTORE_RUNNING_CMDS=''
+    local _TMUX_RESTORE_OC_PANES=''
+    local _TMUX_RESTORE_ARCHIVE_FMT=2
+    _tmux_oc_setup_restored_pane 'sess:5' '5' '0' 'zsh' '/projects/original' '5|0|ses_v2abc|My%20Decoded%20Title|%2Fprojects%2Fdecoded' '%55'
+  "
+  [ "$status" -eq 0 ]
+
+  run grep -F "TITLE : My Decoded Title" "$log_file"
+  [ "$status" -eq 0 ]
+  run grep -F "RUN   : opencode -s ses_v2abc" "$log_file"
+  [ "$status" -eq 0 ]
+  run grep -F "cd -- /projects/decoded" "$log_file"
+  [ "$status" -eq 0 ]
+
+  rm -rf "$fakebin"
+}
+
 @test "oc_capture_session skips without opencode CLI" {
   # Ensure opencode is not in PATH
   run zsh -c "
@@ -135,14 +281,6 @@ EOF
   [ -z "$output" ]
 }
 
-@test "oc_enrich_meta returns 1 for empty sid" {
-  run zsh -c "
-    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
-    _tmux_oc_enrich_meta '' title_var dir_var
-  "
-  [ "$status" -eq 1 ]
-}
-
 @test "plugin functions exist after sourcing" {
   result=$(zsh -c "
     source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
@@ -150,14 +288,12 @@ EOF
     typeset -f _tmux_oc_restore_metadata > /dev/null && echo 'restore_meta:ok'
     typeset -f _tmux_oc_setup_restored_pane > /dev/null && echo 'setup_pane:ok'
     typeset -f _tmux_oc_prompt_restart > /dev/null && echo 'prompt:ok'
-    typeset -f _tmux_oc_enrich_meta > /dev/null && echo 'enrich:ok'
   ")
   echo "result: $result"
   [[ "$result" == *"capture:ok"* ]]
   [[ "$result" == *"restore_meta:ok"* ]]
   [[ "$result" == *"setup_pane:ok"* ]]
   [[ "$result" == *"prompt:ok"* ]]
-  [[ "$result" == *"enrich:ok"* ]]
 }
 
 @test "oc_capture_session prefers detected SID over title match" {
@@ -242,6 +378,78 @@ EOF
   ")
   echo "result: $result"
   [ "$result" = "ses_new222" ]
+}
+
+@test "oc_detect_sid finds SID in exit banner Continue line" {
+  local pane_file="$TMUX_ARCHIVE_DIR/detect_sid_banner_continue.pane"
+  cat > "$pane_file" << 'EOF'
+                                   ▄
+  █▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█
+
+  Session   Chat From Exit
+  Continue  opencode -s ses_banner123
+EOF
+
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_detect_sid_from_pane '$pane_file'
+  ")
+  [ "$result" = "ses_banner123" ]
+}
+
+@test "oc_detect_sid prefers opencode switch over later bare SID" {
+  local pane_file="$TMUX_ARCHIVE_DIR/detect_sid_priority.pane"
+  cat > "$pane_file" << 'EOF'
+ses_old111
+Continue  opencode -s ses_priority222
+prompt output ses_tail999
+EOF
+
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_detect_sid_from_pane '$pane_file'
+  ")
+  [ "$result" = "ses_priority222" ]
+}
+
+@test "oc_detect_sid trims SID to alphanumerics after ses_ prefix" {
+  local pane_file="$TMUX_ARCHIVE_DIR/detect_sid_alnum_only.pane"
+  cat > "$pane_file" << 'EOF'
+opencode -s ses_AbC123-extra_tail
+EOF
+
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_detect_sid_from_pane '$pane_file'
+  ")
+  [ "$result" = "ses_AbC123" ]
+}
+
+@test "oc_detect_sid returns 1 for whitespace-only pane file" {
+  local pane_file="$TMUX_ARCHIVE_DIR/detect_sid_whitespace_only.pane"
+  printf '  \n\t  \n' > "$pane_file"
+
+  run zsh -c "
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_detect_sid_from_pane '$pane_file'
+  "
+  [ "$status" -eq 1 ]
+}
+
+@test "oc_detect_sid handles exit banner followed by prompt junk" {
+  local pane_file="$TMUX_ARCHIVE_DIR/detect_sid_banner_junk.pane"
+  cat > "$pane_file" << 'EOF'
+                                   ▄
+  Session   Noisy Exit
+  Continue  opencode -s ses_clean555
+user@mac % echo ses_noise999
+EOF
+
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_detect_sid_from_pane '$pane_file'
+  ")
+  [ "$result" = "ses_clean555" ]
 }
 
 @test "oc_capture_session falls back to title match when no detected SID" {
@@ -399,14 +607,6 @@ EOF
   " 2>&1)
 
   [[ "$result" == *"%99|ses_abc|%2Fa%7Cb|Raw"* ]]
-}
-
-@test "oc_sid_from_title falls back to table when json is malformed" {
-  result=$(zsh -c "
-    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
-    _tmux_oc_sid_from_title 'Needle Title' '{bad json' 'ses_table001 Needle Title'
-  ")
-  [ "$result" = "ses_table001" ]
 }
 
 @test "oc_enrich_meta keeps input values when export payload is invalid" {
