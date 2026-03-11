@@ -532,6 +532,18 @@ _tmux_archive_save_unlocked() {
     local _src_file=$(tmux display-message -p -t "${session}:${_widx}.${_pidx}" '#{@archive_source_file}' 2>/dev/null)
     if [ -n "$_src_file" ] && [ -f "$_src_file" ]; then
       cp "$_src_file" "$_pane_dst"
+      local _live_tail
+      _live_tail=$(tmux capture-pane -t "${session}:${_widx}.${_pidx}" -p -S -50 2>/dev/null)
+      local _exit_sid
+      _exit_sid=$(echo "$_live_tail" | grep -oE 'Continue[[:space:]]+opencode -s ses_[A-Za-z0-9]+' | tail -1 | grep -oE 'ses_[A-Za-z0-9]+')
+      if [ -n "$_exit_sid" ] && ! grep -q "$_exit_sid" "$_pane_dst" 2>/dev/null; then
+        echo "$_live_tail" | awk -v sid="$_exit_sid" '
+          /^[[:space:]]*▄[[:space:]]*$/ { start=NR; delete blk; n=0 }
+          start { blk[++n]=$0 }
+          index($0,sid) && start { found=n; start=0 }
+          END { if(found) { printf "\n"; for(i=1;i<=found;i++) print blk[i] } }
+        ' >> "$_pane_dst"
+      fi
     else
       tmux capture-pane -t "${session}:${_widx}.${_pidx}" -p -S "$capture_start" 2>/dev/null \
         | awk '{buf[NR]=$0} /[^[:space:]]/{last=NR} END{for(i=1;i<=last;i++) print buf[i]}' \
