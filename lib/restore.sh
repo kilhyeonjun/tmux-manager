@@ -85,20 +85,14 @@ _tmux_archive_restore_unlocked() {
   first_name=$(_tmux_af_decode_field_if_needed "$fmt" "$first_name")
   first_layout=$(_tmux_af_decode_field_if_needed "$fmt" "$first_layout")
 
-  tmux rename-window -t "$session_name" "$first_name" 2>/dev/null || {
-    echo "\033[31m복원 실패: 첫 윈도우 이름 적용 실패\033[0m"
-    [ "$created_session" -eq 1 ] && tmux kill-session -t "$session_name" 2>/dev/null
-    return 1
-  }
+  tmux rename-window -t "$session_name" "$first_name" 2>/dev/null || \
+    echo "\033[33m⚠ 첫 윈도우 이름 적용 실패 (기본 이름 유지)\033[0m"
 
   local current_idx
   current_idx=$(tmux list-windows -t "$session_name" -F '#{window_index}' 2>/dev/null | head -1)
   if [ -n "$current_idx" ] && [ "$current_idx" != "$first_idx" ]; then
-    tmux move-window -s "${session_name}:${current_idx}" -t "${session_name}:${first_idx}" 2>/dev/null || {
-      echo "\033[31m복원 실패: 윈도우 인덱스 보정 실패\033[0m"
-      [ "$created_session" -eq 1 ] && tmux kill-session -t "$session_name" 2>/dev/null
-      return 1
-    }
+    tmux move-window -s "${session_name}:${current_idx}" -t "${session_name}:${first_idx}" 2>/dev/null || \
+      echo "\033[33m⚠ 윈도우 인덱스 보정 실패 (기본 인덱스 유지)\033[0m"
   fi
 
   local row idx wname layout

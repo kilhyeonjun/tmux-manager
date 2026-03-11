@@ -2,6 +2,10 @@
 # Sourced by init.sh
 
 # Enter a tmux session (switch if inside tmux, attach otherwise)
+_tmux_sanitize_name() {
+  echo "$1" | sed 's/\\[0-9]\{3\}//g' | tr -d '\000-\037'
+}
+
 _tmux_enter_session() {
   local session_name="$1"
   [ -z "$session_name" ] && return 1

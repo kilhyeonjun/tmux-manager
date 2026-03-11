@@ -876,14 +876,14 @@ _tmux_archive_save_flow() {
 _tmux_prompt_new_session_name() {
   local name
   read -r 'name?새 세션 이름 (Enter=main): '
-  echo "${name:-main}"
+  echo "$(_tmux_sanitize_name "${name:-main}")"
 }
 
 _tmux_prompt_rename_session_name() {
   local current="$1"
   local newname
   read -r "newname?새 세션 이름 (Enter=유지: ${current}): "
-  echo "$newname"
+  echo "$(_tmux_sanitize_name "$newname")"
 }
 
 tmux-manager() {
