@@ -20,50 +20,59 @@ _tmux_oc_detect_sid_from_pane() {
   echo "$sid"
 }
 
-_tmux_oc_sid_from_title() {
-  local title="$1" list_json="$2" list_table="$3"
-  [ -z "$title" ] && return 1
-
-  local sid=''
-  if [ -n "$list_json" ]; then
-    sid=$(python3 -c 'import json,sys
-title=sys.argv[1].strip()
-raw=sys.stdin.read().strip()
-if not raw:
-    raise SystemExit(0)
-try:
-    data=json.loads(raw)
-except Exception:
-    raise SystemExit(0)
-items=data if isinstance(data,list) else [data]
-for item in items:
-    if not isinstance(item,dict):
-        continue
-    sid=item.get("id","")
-    ititle=item.get("title")
-    if not ititle and isinstance(item.get("info"),dict):
-        ititle=item["info"].get("title","")
-    if isinstance(sid,str) and sid.startswith("ses_") and isinstance(ititle,str) and ititle.strip()==title:
-        print(sid)
-        break' "$title" <<< "$list_json" 2>/dev/null)
-  fi
-
-  if [ -z "$sid" ] && [ -n "$list_table" ]; then
-    sid=$(echo "$list_table" | awk -v t="$title" 'index($0, t) > 0 {print $1; exit}')
-  fi
-
-  [ -z "$sid" ] && return 1
-  echo "$sid"
-}
-
 _tmux_oc_capture_session() {
   local session="$1" file="$2" base="$3"
   command -v opencode &>/dev/null || return 0
   local fmt
   fmt=$(_tmux_af_format_version "$file")
 
-  local oc_list_json=$(opencode session list --format json 2>/dev/null)
-  local oc_list=$(opencode session list 2>/dev/null)
+  local _oc_idx_file="${_TMUX_OC_INDEX_CACHE:-}"
+  local _oc_ps_file="${_TMUX_OC_PS_CACHE:-}"
+  local _oc_idx=''
+  if [ -n "$_oc_idx_file" ] && [ -f "$_oc_idx_file" ]; then
+    _oc_idx=$(cat "$_oc_idx_file")
+  fi
+  if [ -z "$_oc_idx" ]; then
+    _oc_idx=$(opencode session list --format json 2>/dev/null | python3 -c '
+import json,sys
+try:
+  data=json.load(sys.stdin)
+  for s in (data if isinstance(data,list) else []):
+    sid=s.get("id",""); title=s.get("title","").replace("|","/"); d=s.get("directory","")
+    if sid: print(f"{sid}\t{title}\t{d}")
+except: pass' 2>/dev/null)
+  fi
+
+  local _oc_ps=''
+  if [ -n "$_oc_ps_file" ] && [ -f "$_oc_ps_file" ]; then
+    _oc_ps=$(cat "$_oc_ps_file")
+  fi
+  if [ -z "$_oc_ps" ]; then
+    local _all_pane_pids=$(tmux list-panes -t "$session" -F '#{pane_pid}' 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+    _oc_ps=$(ps -axo pid=,ppid=,args= 2>/dev/null | awk -v roots="$_all_pane_pids" '
+      BEGIN { split(roots, r, ","); for(i in r) root[r[i]+0]=1 }
+      { pid=$1+0; ppid=$2+0; $1=""; $2=""; a[pid]=$0; p[pid]=ppid }
+      END {
+        for(rt in root) {
+          queue[1]=rt; head=1; tail=1; found=""
+          while(head<=tail && found=="") {
+            for(pid in p) {
+              if(p[pid]==queue[head]) {
+                tail++; queue[tail]=pid
+                if(a[pid] ~ /opencode.*-s ses_/) {
+                  match(a[pid], /ses_[A-Za-z0-9]+/)
+                  if(RSTART>0) found=substr(a[pid],RSTART,RLENGTH)
+                }
+              }
+            }
+            head++
+          }
+          delete queue
+          if(found!="") print rt "\t" found
+        }
+      }' 2>/dev/null)
+  fi
+
   local pane_ids=$(tmux list-panes -t "$session" -F '#{pane_id}' 2>/dev/null)
 
   echo "$pane_ids" | while read -r _pid; do
@@ -77,16 +86,24 @@ _tmux_oc_capture_session() {
     local pane_file="${base}_w${_widx}_p${_pidx}.pane"
     local detected_sid=''
     detected_sid=$(_tmux_oc_detect_sid_from_pane "$pane_file")
+    local ps_sid=''
+    local pane_pid=$(tmux display-message -p -t "$_pid" '#{pane_pid}' 2>/dev/null)
+    [ -n "$pane_pid" ] && [ -n "$_oc_ps" ] && ps_sid=$(echo "$_oc_ps" | awk -F'\t' -v p="$pane_pid" '$1+0==p+0 {print $2; exit}')
 
     if [[ "$_title" == "OC |"* ]]; then
       local oc_title="${_title#OC | }"
-      local oc_sid="$detected_sid"
-      if [ -z "$oc_sid" ]; then
-        oc_sid=$(_tmux_oc_sid_from_title "$oc_title" "$oc_list_json" "$oc_list")
-      fi
+      local oc_sid="$ps_sid"
+      [ -z "$oc_sid" ] && [ -n "$_oc_idx" ] && oc_sid=$(echo "$_oc_idx" | awk -F'\t' -v t="$oc_title" '$2==t {print $1; exit}')
+      [ -z "$oc_sid" ] && oc_sid="$detected_sid"
       local oc_dir="$_ppath"
-      if [ -n "$oc_sid" ]; then
-        _tmux_oc_enrich_meta "$oc_sid" oc_title oc_dir
+      if [ -n "$oc_sid" ] && [ -n "$_oc_idx" ]; then
+        local _meta=$(echo "$_oc_idx" | awk -F'\t' -v s="$oc_sid" '$1==s {print $2; print $3; exit}')
+        if [ -n "$_meta" ]; then
+          local _et="${_meta%%$'\n'*}"
+          local _ed="${_meta#*$'\n'}"
+          [ -n "$_et" ] && oc_title="$_et"
+          [ -n "$_ed" ] && oc_dir="$_ed"
+        fi
       fi
       if [ "$fmt" -ge 2 ] 2>/dev/null; then
         oc_sid=$(_tmux_af_escape "$oc_sid")
@@ -94,48 +111,27 @@ _tmux_oc_capture_session() {
         oc_dir=$(_tmux_af_escape "$oc_dir")
       fi
       echo "${_widx}|${_pidx}|${oc_sid}|${oc_title}|${oc_dir}" >> "$file"
-    elif [ -n "$detected_sid" ]; then
+    elif [ -n "$ps_sid" ] || [ -n "$detected_sid" ]; then
+      local found_sid="${ps_sid:-$detected_sid}"
       local fallback_title='(detected)'
       local fallback_dir="$_ppath"
-      _tmux_oc_enrich_meta "$detected_sid" fallback_title fallback_dir
+      if [ -n "$_oc_idx" ]; then
+        local _meta=$(echo "$_oc_idx" | awk -F'\t' -v s="$found_sid" '$1==s {print $2; print $3; exit}')
+        if [ -n "$_meta" ]; then
+          local _et="${_meta%%$'\n'*}"
+          local _ed="${_meta#*$'\n'}"
+          [ -n "$_et" ] && fallback_title="$_et"
+          [ -n "$_ed" ] && fallback_dir="$_ed"
+        fi
+      fi
       if [ "$fmt" -ge 2 ] 2>/dev/null; then
-        detected_sid=$(_tmux_af_escape "$detected_sid")
+        found_sid=$(_tmux_af_escape "$found_sid")
         fallback_title=$(_tmux_af_escape "$fallback_title")
         fallback_dir=$(_tmux_af_escape "$fallback_dir")
       fi
-      echo "${_widx}|${_pidx}|${detected_sid}|${fallback_title}|${fallback_dir}" >> "$file"
+      echo "${_widx}|${_pidx}|${found_sid}|${fallback_title}|${fallback_dir}" >> "$file"
     fi
   done
-}
-
-# ── Enrich metadata via `opencode export` ───────────────────────────────────
-# Usage: _tmux_oc_enrich_meta <sid> <title_var> <dir_var>
-# Modifies the caller's variables via dynamic scoping.
-_tmux_oc_enrich_meta() {
-  local sid="$1" title_var="$2" dir_var="$3"
-  [ -z "$sid" ] && return 1
-  [[ "$title_var" == [a-zA-Z_][a-zA-Z0-9_]* ]] || return 1
-  [[ "$dir_var" == [a-zA-Z_][a-zA-Z0-9_]* ]] || return 1
-  local oc_meta=$(opencode export "$sid" 2>/dev/null | python3 -c \
-    'import sys,json; d=json.load(sys.stdin).get("info",{}); t=d.get("title","").replace("|","/"); p=d.get("directory",""); print(t); print(p)' 2>/dev/null)
-  if [ -n "$oc_meta" ]; then
-    local exported_title="${oc_meta%%$'\n'*}"
-    local exported_dir="${oc_meta#*$'\n'}"
-    if [ -n "$exported_title" ]; then
-      if typeset -n _tmux_oc_tref="$title_var" 2>/dev/null; then
-        _tmux_oc_tref="$exported_title"
-      else
-        eval "$title_var=\$exported_title"
-      fi
-    fi
-    if [ -n "$exported_dir" ]; then
-      if typeset -n _tmux_oc_dref="$dir_var" 2>/dev/null; then
-        _tmux_oc_dref="$exported_dir"
-      else
-        eval "$dir_var=\$exported_dir"
-      fi
-    fi
-  fi
 }
 
 # ── Restore metadata ────────────────────────────────────────────────────────
@@ -206,7 +202,8 @@ _tmux_oc_setup_restored_pane() {
 
   if [ -n "$oc_sid" ]; then
     if [ -n "$oc_dir" ] && [ "$oc_dir" != "$ppath" ]; then
-      local qdir="${(q)oc_dir}"
+      local qdir
+      qdir=$(printf '%q' "$oc_dir")
       tmux send-keys -t "$pane_target" "cd -- $qdir" Enter
     fi
     _TMUX_RESTORE_RUNNING_CMDS="${_TMUX_RESTORE_RUNNING_CMDS}  w${widx}.${pidx}: \033[33mopencode\033[0m (\"\033[36m${oc_title}\033[0m\")\n           → cd ${oc_dir} && opencode -s ${oc_sid}\n"
@@ -247,7 +244,8 @@ _tmux_oc_prompt_restart() {
       dir=$(_tmux_af_unescape "$dir")
       title=$(_tmux_af_unescape "$title")
       [ -z "$dir" ] && dir='/'
-      local qdir="${(q)dir}"
+      local qdir
+      qdir=$(printf '%q' "$dir")
       if [ -n "$sid" ]; then
         echo "tmux send-keys -t '$tgt' \"cd -- $qdir\" Enter" >> "$oc_script"
         echo "sleep 0.3" >> "$oc_script"
@@ -278,7 +276,8 @@ _tmux_oc_prompt_restart() {
       [ -z "$dir" ] && dir='/'
       local safe_title="${title//\'/  }"
       local safe_dir="${dir//\'/  }"
-      local qdir="${(q)dir}"
+      local qdir
+      qdir=$(printf '%q' "$dir")
       echo "tmux send-keys -t '$tgt' \"cd -- $qdir\" Enter" >> "$info_script"
       echo "sleep 0.3" >> "$info_script"
       echo "tmux send-keys -t '$tgt' \"echo '[ARCHIVED OPENCODE]'\" Enter" >> "$info_script"

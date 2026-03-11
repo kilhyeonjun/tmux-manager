@@ -122,8 +122,8 @@ _tmux_archive_meta() {
 }
 
 _tmux_archive_meta_bulk() {
-  setopt local_options nonomatch
-  local files=("$TMUX_ARCHIVE_DIR"/*.archive(N))
+  setopt local_options nonomatch null_glob
+  local files=("$TMUX_ARCHIVE_DIR"/*.archive)
   [ "${#files[@]}" -eq 0 ] && return 0
 
   awk '
@@ -335,10 +335,59 @@ _tmux_autoarchive_all() {
   mkdir -p "$TMUX_ARCHIVE_DIR"
   local sessions=$(tmux ls -F '#{session_name}' 2>/dev/null)
   [ -z "$sessions" ] && return
+  if command -v opencode &>/dev/null; then
+    export _TMUX_OC_INDEX_CACHE=$(mktemp -t tmux_oc_idx)
+    if [ -n "$_TMUX_OC_INDEX_CACHE" ]; then
+      opencode session list --format json 2>/dev/null | python3 -c '
+import json,sys
+try:
+  data=json.load(sys.stdin)
+  for s in (data if isinstance(data,list) else []):
+    sid=s.get("id",""); title=s.get("title","").replace("|","/"); d=s.get("directory","")
+    if sid: print(f"{sid}\t{title}\t{d}")
+except: pass' > "$_TMUX_OC_INDEX_CACHE" 2>/dev/null || true
+    fi
+    export _TMUX_OC_PS_CACHE=$(mktemp -t tmux_oc_ps)
+    if [ -n "$_TMUX_OC_PS_CACHE" ]; then
+      local _all_pane_pids=$(tmux list-panes -a -F '#{pane_pid}' 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+      ps -axo pid=,ppid=,args= 2>/dev/null | awk -v roots="$_all_pane_pids" '
+        BEGIN { split(roots, r, ","); for(i in r) root[r[i]+0]=1 }
+        { pid=$1+0; ppid=$2+0; $1=""; $2=""; a[pid]=$0; p[pid]=ppid }
+        END {
+          for(rt in root) {
+            queue[1]=rt; head=1; tail=1; found=""
+            while(head<=tail && found=="") {
+              for(pid in p) {
+                if(p[pid]==queue[head]) {
+                  tail++; queue[tail]=pid
+                  if(a[pid] ~ /opencode.*-s ses_/) {
+                    match(a[pid], /ses_[A-Za-z0-9]+/)
+                    if(RSTART>0) found=substr(a[pid],RSTART,RLENGTH)
+                  }
+                }
+              }
+              head++
+            }
+            delete queue
+            if(found!="") print rt "\t" found
+          }
+        }' > "$_TMUX_OC_PS_CACHE" 2>/dev/null || true
+    fi
+  fi
   echo "$sessions" | while read -r s; do
     _tmux_ensure_uuid "$s" >/dev/null
     tmux-archive save "$s" auto
   done
+  [ -n "$_TMUX_OC_INDEX_CACHE" ] && rm -f "$_TMUX_OC_INDEX_CACHE" 2>/dev/null
+  [ -n "$_TMUX_OC_PS_CACHE" ] && rm -f "$_TMUX_OC_PS_CACHE" 2>/dev/null
+  unset _TMUX_OC_INDEX_CACHE _TMUX_OC_PS_CACHE
+  local manifest="$TMUX_ARCHIVE_DIR/.last-active"
+  {
+    echo "# $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "$sessions" | while read -r s; do
+      tmux show-option -t "$s" -qv @archive_uuid 2>/dev/null
+    done
+  } > "$manifest"
 }
 
 # ── Auto-archive cleanup (per-UUID max + optional age limit) ────────────────
@@ -358,43 +407,44 @@ _tmux_autoarchive_cleanup_unlocked() {
   [ "$max_age_days" -gt 0 ] && use_age_limit=true
   local max_age_secs=$((max_age_days * 86400))
 
-  local uuids=$(for f in "$TMUX_ARCHIVE_DIR"/*.archive;
-  do
+  local index_file=$(mktemp)
+  for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
     [ ! -f "$f" ] && continue
-    grep -q '^AUTO_ARCHIVED=true' "$f" || continue
-    local uuid=$(_tmux_af_header_get "$f" SESSION_UUID)
-    [ -z "$uuid" ] && uuid='_legacy'
-    echo "$uuid"
-  done | sort -u)
+    awk -v fp="$f" '
+      /^AUTO_ARCHIVED=/ { auto = ($0 == "AUTO_ARCHIVED=true") }
+      /^SESSION_UUID=/  { uuid = substr($0, index($0,"=")+1) }
+      /^ARCHIVED_AT=/   { adate = substr($0, index($0,"=")+1) }
+      /^---WINDOWS---/  { exit }
+      END {
+        if (auto && uuid != "") print uuid "|" adate "|" fp
+        else if (auto) print "_legacy|" adate "|" fp
+      }
+    ' "$f"
+  done > "$index_file"
 
-  while IFS= read -r uuid; do
-    [ -z "$uuid" ] && continue
-    local idx=0
-    while IFS= read -r f; do
-      [ -z "$f" ] && continue
-      idx=$((idx + 1))
-      local should_delete=false
-      [ $idx -gt $max_per_uuid ] && should_delete=true
-      if [ "$should_delete" = false ] && [ "$use_age_limit" = true ]; then
-        local fdate=$(grep '^ARCHIVED_AT=' "$f" | cut -d= -f2-)
-        local fsecs=$(date -j -f '%Y-%m-%d %H:%M:%S' "$fdate" +%s 2>/dev/null)
-        if [ -n "$fsecs" ] && [ $((now - fsecs)) -gt $max_age_secs ]; then
-          should_delete=true
-        fi
-      fi
-      if [ "$should_delete" = true ]; then
-        local fbase="${f%.archive}"
-        rm -f "${fbase}"_w*_p*.pane 2>/dev/null
-        rm -f "$f"
-      fi
-    done < <(for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
-      [ ! -f "$f" ] && continue
-      grep -q '^AUTO_ARCHIVED=true' "$f" || continue
-      local fuuid=$(_tmux_af_header_get "$f" SESSION_UUID)
-      [ -z "$fuuid" ] && fuuid='_legacy'
-      [ "$fuuid" = "$uuid" ] && echo "$f"
-    done | sort -r)
-  done <<< "$uuids"
+  sort -t'|' -k1,1 -k2,2r "$index_file" | \
+  awk -F'|' -v max_n="$max_per_uuid" -v use_age="$use_age_limit" \
+            -v max_secs="$max_age_secs" -v now="$now" '
+    {
+      uuid = $1; adate = $2; fpath = $3
+      if (uuid != prev_uuid) { count = 0; prev_uuid = uuid }
+      count++
+      del = 0
+      if (count > max_n) del = 1
+      if (!del && use_age == "true" && adate != "") {
+        gsub(/[-:]/, " ", adate)
+        fsecs = mktime(adate)
+        if (fsecs > 0 && (now - fsecs) > max_secs) del = 1
+      }
+      if (del) print fpath
+    }
+  ' | while IFS= read -r f; do
+    local fbase="${f%.archive}"
+    rm -f "${fbase}"_w*_p*.pane 2>/dev/null
+    rm -f "$f"
+  done
+
+  rm -f "$index_file"
 }
 
 _tmux_autoarchive_cleanup() {
@@ -478,7 +528,9 @@ _tmux_archive_save_unlocked() {
     capture_start="-${auto_lines}"
   fi
   tmux list-panes -t "$session" -F '#{window_index}|#{pane_index}' 2>/dev/null | while IFS='|' read -r _widx _pidx; do
-    tmux capture-pane -t "${session}:${_widx}.${_pidx}" -p -S "$capture_start" > "${base}_w${_widx}_p${_pidx}.pane" 2>/dev/null
+    tmux capture-pane -t "${session}:${_widx}.${_pidx}" -p -S "$capture_start" 2>/dev/null \
+      | awk '{buf[NR]=$0} /[^[:space:]]/{last=NR} END{for(i=1;i<=last;i++) print buf[i]}' \
+      > "${base}_w${_widx}_p${_pidx}.pane"
   done
   [ "$auto_mode" != 'auto' ] && echo "\033[32m✓ 아카이브 저장: $session → $file\033[0m"
 }
@@ -487,7 +539,7 @@ _tmux_archive_save_unlocked() {
 #  tmux-archive CLI
 # ═══════════════════════════════════════════════════════════════════════════
 tmux-archive() {
-  setopt local_options nonomatch typeset_silent
+  setopt local_options nonomatch null_glob typeset_silent
   mkdir -p "$TMUX_ARCHIVE_DIR"
   local cmd="${1:-help}"
   case "$cmd" in
@@ -517,7 +569,7 @@ tmux-archive() {
       _tmux_archive_restore "$2"
       ;;
     list)
-      local files=("$TMUX_ARCHIVE_DIR"/*.archive(N))
+      local files=("$TMUX_ARCHIVE_DIR"/*.archive)
       if [ ! -d "$TMUX_ARCHIVE_DIR" ] || [ "${#files[@]}" -eq 0 ]; then
         echo "\033[90m아카이브 없음\033[0m"; return
       fi
@@ -537,12 +589,62 @@ tmux-archive() {
       fi
       _tmux_archive_delete_file "$file"
       ;;
+    restore-last)
+      setopt local_options nonomatch null_glob typeset_silent
+      local manifest="$TMUX_ARCHIVE_DIR/.last-active"
+      if [ ! -f "$manifest" ]; then
+        echo "\033[31m.last-active 매니페스트 없음 (autoarchive가 한 번도 실행되지 않음)\033[0m"
+        return 1
+      fi
+      local manifest_date=$(head -1 "$manifest" | sed 's/^# //')
+      echo "\033[1;36m━━━ 마지막 활성 세션 복원 ━━━\033[0m"
+      echo "\033[90m매니페스트: $manifest_date\033[0m"
+      echo ''
+      typeset -A uuid_latest_file uuid_latest_ts
+      for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
+        local fuuid=$(grep '^SESSION_UUID=' "$f" 2>/dev/null | cut -d= -f2)
+        [ -z "$fuuid" ] && continue
+        local fts=$(stat -f '%m' "$f" 2>/dev/null)
+        [ -z "$fts" ] && continue
+        local prev_ts="${uuid_latest_ts[$fuuid]:-0}"
+        if [ "$fts" -gt "$prev_ts" ] 2>/dev/null; then
+          uuid_latest_ts[$fuuid]="$fts"
+          uuid_latest_file[$fuuid]="$f"
+        fi
+      done
+      local restored=0 skipped=0 failed=0
+      while IFS= read -r uuid; do
+        [ -z "$uuid" ] && continue
+        [[ "$uuid" == '#'* ]] && continue
+        local latest="${uuid_latest_file[$uuid]}"
+        if [ -z "$latest" ]; then
+          echo "  \033[31m✗ 실패\033[0m  UUID=$uuid (아카이브 없음)"
+          failed=$((failed + 1))
+          continue
+        fi
+        local sname=$(_tmux_af_header_get "$latest" SESSION_NAME)
+        if tmux has-session -t "$sname" 2>/dev/null; then
+          echo "  \033[33m⊘ 스킵\033[0m  $sname (이미 존재)"
+          skipped=$((skipped + 1))
+          continue
+        fi
+        if tmux-archive restore "$latest"; then
+          restored=$((restored + 1))
+        else
+          echo "  \033[31m✗ 실패\033[0m  $sname"
+          failed=$((failed + 1))
+        fi
+      done < "$manifest"
+      echo ''
+      echo "\033[1m결과: \033[32m${restored}\033[0m 복원  \033[33m${skipped}\033[0m 스킵  \033[31m${failed}\033[0m 실패"
+      ;;
     *)
       echo 'tmux-archive <command>'
       echo ''
       echo '  save [session]         세션 아카이브 저장'
       echo '  save-and-kill [session] 아카이브 저장 후 세션 종료'
       echo '  restore [file]         아카이브에서 복원'
+      echo '  restore-last           마지막 활성 세션 일괄 복원'
       echo '  list                   아카이브 목록'
       echo '  delete [file]          아카이브 삭제'
       ;;
@@ -553,14 +655,15 @@ tmux-archive() {
 #  Archive Manager — Level 1: UUID group list
 # ═══════════════════════════════════════════════════════════════════════════
 _tmux_archive_manager() {
-  setopt local_options nonomatch typeset_silent
+  setopt local_options nonomatch null_glob typeset_silent
   while true; do
-    local archive_count=$(print -rl -- "$TMUX_ARCHIVE_DIR"/*.archive(N) | wc -l | tr -d ' ')
+    local archive_files=("$TMUX_ARCHIVE_DIR"/*.archive)
+    local archive_count="${#archive_files[@]}"
     clear
     echo '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m'
     echo '\033[1;34m  📦 아카이브 매니저          \033[90m'"${archive_count}"'개\033[0m'
     echo '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m'
-    echo '\033[33mEnter\033[0m 그룹 열기  \033[32mCtrl+S\033[0m 새 아카이브  \033[31mCtrl+X\033[0m 그룹 삭제  \033[36mCtrl+L\033[0m 새로고침  \033[90mESC\033[0m 돌아가기'
+    echo '\033[33mEnter\033[0m 그룹 열기  \033[32mCtrl+S\033[0m 새 아카이브  \033[31mCtrl+X\033[0m 그룹 삭제  \033[36mCtrl+L\033[0m 새로고침  \033[90mESC\033[0m 돌아가기  \033[32m●\033[0m활성 \033[90m○\033[0m비활성'
     echo ''
 
     if [ "$archive_count" -eq 0 ] 2>/dev/null || [ "$archive_count" = "0" ]; then
@@ -584,18 +687,32 @@ _tmux_archive_manager() {
       fi
     fi
 
-    # Group list
+    typeset -A _active_uuids
+    _active_uuids=()
+    while IFS= read -r _s; do
+      local _u=$(tmux show-option -t "$_s" -qv @archive_uuid 2>/dev/null)
+      [ -n "$_u" ] && _active_uuids[$_u]=1
+    done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null)
+
     local glist
     glist=$(_tmux_archive_groups | sort -t'|' -k4 -r | while IFS='|' read -r uuid name total latest auto_cnt oc_total sid_missing_total; do
       local label="$name"
       [ "$uuid" = '_legacy' ] && label="(레거시)"
+      local status_hint=''
+      local active_sort=1
+      if [ "${_active_uuids[$uuid]}" = '1' ]; then
+        status_hint="\033[32m● \033[0m"
+        active_sort=0
+      else
+        status_hint="\033[90m○ \033[0m"
+      fi
       local auto_hint=''
       local oc_hint=''
       [ "$auto_cnt" -gt 0 ] 2>/dev/null && auto_hint=" \033[90m[auto:${auto_cnt}]\033[0m"
       [ "$oc_total" -gt 0 ] 2>/dev/null && oc_hint=" \033[34m[OC:${oc_total}]\033[0m"
       [ "$sid_missing_total" -gt 0 ] 2>/dev/null && oc_hint="${oc_hint} \033[31m[sid?:${sid_missing_total}]\033[0m"
-      printf '%s|%-18s  \033[90m%s\033[0m  \033[36m%s개\033[0m%b%b\n' "$uuid" "$label" "$latest" "$total" "$auto_hint" "$oc_hint"
-    done)
+      printf '%d\t%s\t%s|%b%-18s  \033[90m%s\033[0m  \033[36m%s개\033[0m%b%b\n' "$active_sort" "$latest" "$uuid" "$status_hint" "$label" "$latest" "$total" "$auto_hint" "$oc_hint"
+    done | sort -t$'\t' -k1,1n -k2,2r | cut -f3-)
     if [ -z "$(echo "$glist" | tr -d '[:space:]')" ]; then
       echo '  \033[90m표시할 그룹 없음 (Ctrl+L 새로고침)\033[0m'
       sleep 0.6
@@ -770,8 +887,9 @@ _tmux_prompt_rename_session_name() {
 }
 
 tmux-manager() {
-  setopt local_options nonomatch typeset_silent
-  local archive_count=$(print -rl -- "$TMUX_ARCHIVE_DIR"/*.archive(N) | wc -l | tr -d ' ')
+  setopt local_options nonomatch null_glob typeset_silent
+  local archive_files=("$TMUX_ARCHIVE_DIR"/*.archive)
+  local archive_count="${#archive_files[@]}"
   if ! tmux ls &>/dev/null; then
     clear
     echo '\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m'
@@ -806,7 +924,8 @@ tmux-manager() {
   while true; do
     clear
     local total=$(tmux ls | wc -l | tr -d ' ')
-    archive_count=$(print -rl -- "$TMUX_ARCHIVE_DIR"/*.archive(N) | wc -l | tr -d ' ')
+    local archive_files_loop=("$TMUX_ARCHIVE_DIR"/*.archive)
+    archive_count="${#archive_files_loop[@]}"
     local archive_hint=''
     [ "$archive_count" -gt 0 ] 2>/dev/null && archive_hint="  \033[90m📦 ${archive_count}개\033[0m"
     echo '\033[1;36m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m'

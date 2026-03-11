@@ -91,3 +91,27 @@ _tmux_archive_with_lock() {
   _tmux_archive_lock_release
   return $rc
 }
+
+# Wait for a tmux pane's shell to be ready (interactive prompt loaded).
+# Polls pane_current_command until it shows a known shell name.
+# Usage: _tmux_wait_for_shell <pane_target> [max_attempts]
+#   max_attempts: each attempt sleeps 0.1s. Default 50 = 5s max.
+_tmux_wait_for_prompt() {
+  setopt local_options typeset_silent
+  local target="$1"
+  local max="${2:-100}"
+  local i=0
+  while [ "$i" -lt "$max" ]; do
+    local last
+    last=$(tmux capture-pane -t "$target" -p 2>/dev/null | awk 'NF{l=$0}END{print l}')
+    if [ -n "$last" ]; then
+      sleep 0.3
+      local confirm
+      confirm=$(tmux capture-pane -t "$target" -p 2>/dev/null | awk 'NF{l=$0}END{print l}')
+      [ "$last" = "$confirm" ] && return 0
+    fi
+    sleep 0.1
+    i=$((i + 1))
+  done
+  return 0
+}

@@ -177,11 +177,14 @@ _tmux_archive_restore_unlocked() {
       pcmd=$(_tmux_af_decode_field_if_needed "$fmt" "$pcmd")
       ptitle=$(_tmux_af_decode_field_if_needed "$fmt" "$ptitle")
 
+      _tmux_wait_for_prompt "$pane_target"
+
       local pane_file="${base}_w${p_widx}_p${pidx}.pane"
       if [ -f "$pane_file" ] && grep -q '[^[:space:]]' "$pane_file"; then
         local qpane="${(q)pane_file}"
-        tmux send-keys -t "$pane_target" "cat -- $qpane" Enter
-        sleep 0.2
+        local _trimmed=$(mktemp)
+        awk '{b[NR]=$0}/[^[:space:]]/{l=NR}END{for(i=1;i<=l;i++)print b[i]}' "$pane_file" > "$_trimmed"
+        tmux send-keys -t "$pane_target" " cat ${(q)_trimmed}; rm -f ${(q)_trimmed}" Enter
       fi
       local qpath="${(q)ppath}"
       tmux send-keys -t "$pane_target" "cd -- $qpath" Enter
