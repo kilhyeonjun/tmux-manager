@@ -206,6 +206,15 @@ _tmux_oc_setup_restored_pane() {
       qdir=$(printf '%q' "$oc_dir")
       tmux send-keys -t "$pane_target" "cd -- $qdir" Enter
     fi
+    # Echo OC session info directly into the pane so user sees it on attach
+    tmux send-keys -t "$pane_target" " echo ''" Enter
+    tmux send-keys -t "$pane_target" " echo '  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'" Enter
+    tmux send-keys -t "$pane_target" " echo '  [ARCHIVED OPENCODE]'" Enter
+    tmux send-keys -t "$pane_target" " echo '  TITLE : ${oc_title}'" Enter
+    tmux send-keys -t "$pane_target" " echo '  SID   : ${oc_sid}'" Enter
+    tmux send-keys -t "$pane_target" " echo '  RUN   : opencode -s ${oc_sid}'" Enter
+    tmux send-keys -t "$pane_target" " echo '  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'" Enter
+    tmux send-keys -t "$pane_target" " echo ''" Enter
     _TMUX_RESTORE_RUNNING_CMDS="${_TMUX_RESTORE_RUNNING_CMDS}  w${widx}.${pidx}: \033[33mopencode\033[0m (\"\033[36m${oc_title}\033[0m\")\n           → cd ${oc_dir} && opencode -s ${oc_sid}\n"
     local esc_sid esc_dir esc_title
     esc_sid=$(_tmux_af_escape "$oc_sid")
@@ -213,6 +222,15 @@ _tmux_oc_setup_restored_pane() {
     esc_title=$(_tmux_af_escape "$oc_title")
     _TMUX_RESTORE_OC_PANES="${_TMUX_RESTORE_OC_PANES}${pane_target}|${esc_sid}|${esc_dir}|${esc_title}\n"
   else
+    # No SID — still show info so user knows this was an OC pane
+    tmux send-keys -t "$pane_target" " echo ''" Enter
+    tmux send-keys -t "$pane_target" " echo '  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'" Enter
+    tmux send-keys -t "$pane_target" " echo '  [ARCHIVED OPENCODE]'" Enter
+    tmux send-keys -t "$pane_target" " echo '  TITLE : ${oc_title}'" Enter
+    tmux send-keys -t "$pane_target" " echo '  SID   : (없음 - 새 세션으로 시작하세요)'" Enter
+    tmux send-keys -t "$pane_target" " echo '  RUN   : opencode -c'" Enter
+    tmux send-keys -t "$pane_target" " echo '  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'" Enter
+    tmux send-keys -t "$pane_target" " echo ''" Enter
     _TMUX_RESTORE_RUNNING_CMDS="${_TMUX_RESTORE_RUNNING_CMDS}  w${widx}.${pidx}: \033[33mopencode\033[0m (\"${oc_title}\")\n           → opencode -c\n"
     local esc_ppath esc_title
     esc_ppath=$(_tmux_af_escape "$ppath")
