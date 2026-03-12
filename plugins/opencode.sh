@@ -21,7 +21,7 @@ _tmux_oc_detect_sid_from_pane() {
 }
 
 _tmux_oc_detect_sid_from_tui() {
-  local pane_target="$1" pane_cwd="$2"
+  local pane_target="$1" pane_cwd="$2" pane_title="$3"
   local OC_DB="${_TMUX_OC_DB:-/Users/gameduo/.local/share/opencode/opencode.db}"
   [ -f "$OC_DB" ] || return 1
   command -v sqlite3 &>/dev/null || return 1
@@ -29,6 +29,18 @@ _tmux_oc_detect_sid_from_tui() {
   local pane_content
   pane_content=$(tmux capture-pane -t "$pane_target" -p -S 0 2>/dev/null) || return 1
   [ -z "$pane_content" ] && return 1
+
+  local oc_name=''
+  [[ "$pane_title" == "OC |"* ]] && oc_name="${pane_title#OC | }"
+  [[ "$pane_title" == "OC |"* ]] && oc_name="${oc_name## }"
+
+  if [ -n "$oc_name" ]; then
+    local title_sid
+    title_sid=$(sqlite3 "$OC_DB" "SELECT id FROM session WHERE title = '${oc_name//\'/\'\'}' ORDER BY time_updated DESC LIMIT 1;" 2>/dev/null)
+    [ -n "$title_sid" ] && echo "$title_sid" && return 0
+    title_sid=$(sqlite3 "$OC_DB" "SELECT id FROM session WHERE title LIKE '%${oc_name//\'/\'\'}%' ORDER BY time_updated DESC LIMIT 1;" 2>/dev/null)
+    [ -n "$title_sid" ] && echo "$title_sid" && return 0
+  fi
 
   local db_rows
   db_rows=$(sqlite3 "$OC_DB" "SELECT id, title FROM session WHERE directory = '${pane_cwd//\'/\'\'}' ORDER BY time_updated DESC LIMIT 20;" 2>/dev/null)
@@ -136,7 +148,7 @@ except: pass' 2>/dev/null)
 
     if [ "$is_oc_running" = true ]; then
       local oc_sid=''
-      oc_sid=$(_tmux_oc_detect_sid_from_tui "$_pid" "$_ppath" 2>/dev/null) || true
+      oc_sid=$(_tmux_oc_detect_sid_from_tui "$_pid" "$_ppath" "$_title" 2>/dev/null) || true
 
       if [ -z "$oc_sid" ]; then
         oc_sid=$(_tmux_oc_detect_sid_from_pane "$pane_file" 2>/dev/null) || true
