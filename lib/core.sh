@@ -659,6 +659,7 @@ tmux-archive() {
         echo "\033[90m  지원 형식: HH:MM, HHMM, YYYYMMDD_HHMM\033[0m"
         return 1
       fi
+      # shellcheck disable=SC2206
       local matches=("$TMUX_ARCHIVE_DIR"/*_${ts_pattern}*.archive)
       if [ ${#matches[@]} -eq 0 ] || [ ! -f "${matches[1]}" ]; then
         echo "\033[31m${ts_pattern} 시점의 아카이브 없음\033[0m"
@@ -671,6 +672,7 @@ tmux-archive() {
           | sort -u | tail -10 | while read -r t; do
             local d="${t:0:4}-${t:4:2}-${t:6:2} ${t:9:2}:${t:11:2}"
             local cnt=0
+            # shellcheck disable=SC2231
             for _f in "$TMUX_ARCHIVE_DIR"/*_${t}*.archive; do
               [ -f "$_f" ] && cnt=$((cnt + 1))
             done
@@ -995,14 +997,14 @@ _tmux_archive_save_flow() {
 _tmux_prompt_new_session_name() {
   local name
   read -r 'name?새 세션 이름 (Enter=main): '
-  echo "$(_tmux_sanitize_name "${name:-main}")"
+  _tmux_sanitize_name "${name:-main}"
 }
 
 _tmux_prompt_rename_session_name() {
   local current="$1"
   local newname
   read -r "newname?새 세션 이름 (Enter=유지: ${current}): "
-  echo "$(_tmux_sanitize_name "$newname")"
+  _tmux_sanitize_name "$newname"
 }
 
 tmux-manager() {
@@ -1046,6 +1048,7 @@ tmux-manager() {
             | sort -u | while read -r t; do
               local d="${t:0:4}-${t:4:2}-${t:6:2} ${t:9:2}:${t:11:2}"
               local cnt=0
+              # shellcheck disable=SC2231
               for _f in "$TMUX_ARCHIVE_DIR"/*_${t}*.archive; do
                 [ -f "$_f" ] && cnt=$((cnt + 1))
               done
