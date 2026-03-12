@@ -1048,9 +1048,11 @@ tmux-manager() {
             | sort -u | while read -r d; do
               local fmt="${d:0:4}-${d:4:2}-${d:6:2}"
               local cnt=0
+              # shellcheck disable=SC2231
               for _f in "$TMUX_ARCHIVE_DIR"/*_${d}_*.archive; do
                 [ -f "$_f" ] && cnt=$((cnt + 1))
               done
+              # shellcheck disable=SC2231
               local times=$(for _f in "$TMUX_ARCHIVE_DIR"/*_${d}_*.archive; do
                 [ -f "$_f" ] || continue
                 echo "$_f"
@@ -1062,7 +1064,8 @@ tmux-manager() {
           sel_date=$(echo "$date_list" | fzf --height=40% --reverse --header='복원할 날짜 선택' \
             -d'|' --with-nth=2 --tac | cut -d'|' -f1)
           [ -z "$sel_date" ] && return
-          local time_list=$( for f in "$TMUX_ARCHIVE_DIR"/*_${sel_date}_*.archive; do
+          local time_list=$( # shellcheck disable=SC2231
+            for f in "$TMUX_ARCHIVE_DIR"/*_${sel_date}_*.archive; do
               [ -f "$f" ] || continue
               echo "$f"
             done | sed "s/.*_${sel_date}_\([0-9]\{4\}\)[0-9]*.archive/\1/" \
