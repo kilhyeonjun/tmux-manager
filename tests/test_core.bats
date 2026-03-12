@@ -669,3 +669,125 @@ EOF
   ")
   [ "$value" = "new-name" ]
 }
+
+# ── restore-at tests ────────────────────────────────────────────────────────
+
+create_timestamped_archive() {
+  local name="$1" ts="$2"
+  local safe_name=$(echo "$name" | tr ' ' '_')
+  local file="$TMUX_ARCHIVE_DIR/${safe_name}_${ts}.archive"
+  cat > "$file" << EOF
+SESSION_NAME=$name
+SESSION_UUID=$(uuidgen)
+ARCHIVED_AT=$(echo "$ts" | sed 's/_/ /; s/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3/; s/ \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/ \1:\2:\3/')
+---WINDOWS---
+1|main|tiled
+---PANES---
+$name|1|0|/tmp|zsh|zsh
+---OPENCODE---
+EOF
+  echo "$file"
+}
+
+@test "restore-at shows usage when no timestamp given" {
+  run zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    export TMUX_ARCHIVE_DIR='$TMUX_ARCHIVE_DIR'
+    tmux-archive restore-at
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"사용법"* ]]
+}
+
+@test "restore-at rejects invalid time format" {
+  run zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    export TMUX_ARCHIVE_DIR='$TMUX_ARCHIVE_DIR'
+    tmux-archive restore-at 'abc'
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"시간 형식 오류"* ]]
+}
+
+@test "restore-at returns error when no archives match" {
+  create_timestamped_archive "test-sess" "20260312_140000"
+
+  run zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    export TMUX_ARCHIVE_DIR='$TMUX_ARCHIVE_DIR'
+    tmux-archive restore-at '99:99'
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"아카이브 없음"* ]]
+  [[ "$output" == *"사용 가능한 시점"* ]]
+}
+
+@test "restore-at finds archives by HHMM format" {
+  create_timestamped_archive "sess-a" "20260312_133500"
+  create_timestamped_archive "sess-b" "20260312_133501"
+  create_timestamped_archive "sess-other" "20260312_140000"
+
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    export TMUX_ARCHIVE_DIR='$TMUX_ARCHIVE_DIR'
+    tmux-archive restore-at '13:35' 2>&1
+  " 2>/dev/null)
+  echo "result: $result"
+  [[ "$result" == *"sess-a"* ]]
+  [[ "$result" == *"sess-b"* ]]
+  [[ "$result" != *"sess-other"* ]]
+  [[ "$result" == *"2개 세션"* ]]
+}
+
+@test "restore-at parses HHMM without colon" {
+  create_timestamped_archive "no-colon" "20260312_143200"
+
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    export TMUX_ARCHIVE_DIR='$TMUX_ARCHIVE_DIR'
+    tmux-archive restore-at '1432' 2>&1
+  " 2>/dev/null)
+  echo "result: $result"
+  [[ "$result" == *"no-colon"* ]]
+}
+
+@test "restore-at parses full YYYYMMDD_HHMM" {
+  create_timestamped_archive "full-ts" "20260312_143200"
+
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    export TMUX_ARCHIVE_DIR='$TMUX_ARCHIVE_DIR'
+    tmux-archive restore-at '20260312_1432' 2>&1
+  " 2>/dev/null)
+  echo "result: $result"
+  [[ "$result" == *"full-ts"* ]]
+}
+
+@test "restore-at help text is shown" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    tmux-archive help 2>&1 || tmux-archive 2>&1
+  ")
+  [[ "$result" == *"restore-at"* ]]
+}

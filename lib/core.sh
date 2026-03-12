@@ -605,6 +605,75 @@ tmux-archive() {
       fi
       _tmux_archive_delete_file "$file"
       ;;
+    restore-at)
+      setopt local_options nonomatch null_glob typeset_silent
+      local raw_ts="$2"
+      if [ -z "$raw_ts" ]; then
+        echo "\033[31m사용법: tmux-archive restore-at <시간>\033[0m"
+        echo "\033[90m  예: tmux-archive restore-at 13:35\033[0m"
+        echo "\033[90m      tmux-archive restore-at 1335\033[0m"
+        echo "\033[90m      tmux-archive restore-at 20260312_1335\033[0m"
+        return 1
+      fi
+      local ts_pattern
+      ts_pattern=$(echo "$raw_ts" | sed 's/://g; s/-//g; s/ /_/g')
+      if [[ "$ts_pattern" =~ ^[0-9]{4}$ ]]; then
+        ts_pattern="$(date +%Y%m%d)_${ts_pattern}"
+      elif [[ "$ts_pattern" =~ ^[0-9]{8}_[0-9]{4}$ ]]; then
+        :
+      elif [[ "$ts_pattern" =~ ^[0-9]{8}_[0-9]{6}$ ]]; then
+        ts_pattern="${ts_pattern:0:13}"
+      else
+        echo "\033[31m시간 형식 오류: $raw_ts\033[0m"
+        echo "\033[90m  지원 형식: HH:MM, HHMM, YYYYMMDD_HHMM\033[0m"
+        return 1
+      fi
+      local matches=("$TMUX_ARCHIVE_DIR"/*_${ts_pattern}*.archive)
+      if [ ${#matches[@]} -eq 0 ] || [ ! -f "${matches[1]}" ]; then
+        echo "\033[31m${ts_pattern} 시점의 아카이브 없음\033[0m"
+        echo ''
+        echo "\033[90m사용 가능한 시점:\033[0m"
+        for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
+          [ -f "$f" ] || continue
+          echo "$f"
+        done | sed 's/.*_\([0-9]\{8\}_[0-9]\{4\}\)[0-9]*.archive/\1/' \
+          | sort -u | tail -10 | while read -r t; do
+            local d="${t:0:4}-${t:4:2}-${t:6:2} ${t:9:2}:${t:11:2}"
+            local cnt=0
+            for _f in "$TMUX_ARCHIVE_DIR"/*_${t}*.archive; do
+              [ -f "$_f" ] && cnt=$((cnt + 1))
+            done
+            printf "  \033[36m%s\033[0m  (%s개)\n" "$d" "$cnt"
+          done
+        return 1
+      fi
+      echo "\033[1;36m━━━ 특정 시점 복원 ━━━\033[0m"
+      echo "\033[90m시점: ${ts_pattern:0:4}-${ts_pattern:4:2}-${ts_pattern:6:2} ${ts_pattern:9:2}:${ts_pattern:11:2}\033[0m"
+      echo "\033[90m대상: ${#matches[@]}개 세션\033[0m"
+      echo ''
+      for f in "${matches[@]}"; do
+        local sname=$(_tmux_af_header_get "$f" SESSION_NAME)
+        printf "  \033[36m%s\033[0m\n" "$sname"
+      done
+      echo ''
+      local restored=0 skipped=0 failed=0
+      for f in "${matches[@]}"; do
+        local sname=$(_tmux_af_header_get "$f" SESSION_NAME)
+        if tmux has-session -t "=$sname" 2>/dev/null; then
+          echo "  \033[33m⊘ 스킵\033[0m  $sname (이미 존재)"
+          skipped=$((skipped + 1))
+          continue
+        fi
+        if tmux-archive restore "$f"; then
+          restored=$((restored + 1))
+        else
+          echo "  \033[31m✗ 실패\033[0m  $sname"
+          failed=$((failed + 1))
+        fi
+      done
+      echo ''
+      echo "\033[1m결과: \033[32m${restored}\033[0m 복원  \033[33m${skipped}\033[0m 스킵  \033[31m${failed}\033[0m 실패"
+      ;;
     restore-last)
       setopt local_options nonomatch null_glob typeset_silent
       local manifest="$TMUX_ARCHIVE_DIR/.last-active"
@@ -661,6 +730,7 @@ tmux-archive() {
       echo '  save-and-kill [session] 아카이브 저장 후 세션 종료'
       echo '  restore [file]         아카이브에서 복원'
       echo '  restore-last           마지막 활성 세션 일괄 복원'
+      echo '  restore-at <시간>      특정 시점 일괄 복원 (13:35, 1335 등)'
       echo '  list                   아카이브 목록'
       echo '  delete [file]          아카이브 삭제'
       ;;
@@ -923,12 +993,8 @@ tmux-manager() {
         [ "$manifest_count" -gt 0 ] 2>/dev/null && has_manifest=true
       fi
       echo ''
-      if [ "$has_manifest" = true ]; then
-        local manifest_date=$(head -1 "$manifest" | sed 's/^# //')
-        echo "  \033[32m1\033[0m 새 세션 생성  \033[34m2\033[0m 아카이브 매니저  \033[33m3\033[0m 마지막 세션 복원 (${manifest_count}개, ${manifest_date})  \033[90m4\033[0m 취소"
-      else
-        echo '  \033[32m1\033[0m 새 세션 생성  \033[34m2\033[0m 아카이브 매니저  \033[90m3\033[0m 취소'
-      fi
+      echo ''
+      echo '  \033[32m1\033[0m 새 세션 생성  \033[34m2\033[0m 아카이브 매니저  \033[33m3\033[0m 세션 복원  \033[90m4\033[0m 취소'
       echo ''
       local opt
       read -r 'opt?선택: '
@@ -940,11 +1006,26 @@ tmux-manager() {
           ;;
         2) _tmux_archive_manager ;;
         3)
-          if [ "$has_manifest" = true ]; then
-            tmux-archive restore-last
-            local first_session=$(tmux ls -F '#{session_name}' 2>/dev/null | head -1)
-            [ -n "$first_session" ] && tmux attach -t "=$first_session"
-          fi
+          local time_list=$( for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
+              [ -f "$f" ] || continue
+              echo "$f"
+            done | sed 's/.*_\([0-9]\{8\}_[0-9]\{4\}\)[0-9]*.archive/\1/' \
+            | sort -u | while read -r t; do
+              local d="${t:0:4}-${t:4:2}-${t:6:2} ${t:9:2}:${t:11:2}"
+              local cnt=0
+              for _f in "$TMUX_ARCHIVE_DIR"/*_${t}*.archive; do
+                [ -f "$_f" ] && cnt=$((cnt + 1))
+              done
+              printf '%s|%s  (%s개 세션)\n' "$t" "$d" "$cnt"
+            done )
+          [ -z "$time_list" ] && { echo "\033[31m복원 가능한 아카이브 없음\033[0m"; return; }
+          local selected
+          selected=$(echo "$time_list" | fzf --height=40% --reverse --header='복원할 시점 선택 (최신이 아래)' \
+            -d'|' --with-nth=2 --tac | cut -d'|' -f1)
+          [ -z "$selected" ] && return
+          tmux-archive restore-at "$selected"
+          local first_session=$(tmux ls -F '#{session_name}' 2>/dev/null | head -1)
+          [ -n "$first_session" ] && tmux attach -t "=$first_session"
           ;;
         *) return ;;
       esac
