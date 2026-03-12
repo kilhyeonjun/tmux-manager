@@ -199,6 +199,7 @@ _tmux_archive_restore_unlocked() {
       oc_line=$(echo "$oc_section" | awk -F'|' -v w="$p_widx" -v p="$pidx" '$1==w && $2==p {print; exit}')
       local is_oc=false
       [[ "$ptitle" == 'OC |'* ]] && is_oc=true
+      [[ "$ptitle" == 'OpenCode' ]] && is_oc=true
       [ -n "$oc_line" ] && is_oc=true
 
       if [ "$is_oc" = true ]; then

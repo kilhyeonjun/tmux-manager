@@ -288,12 +288,14 @@ EOF
     typeset -f _tmux_oc_restore_metadata > /dev/null && echo 'restore_meta:ok'
     typeset -f _tmux_oc_setup_restored_pane > /dev/null && echo 'setup_pane:ok'
     typeset -f _tmux_oc_prompt_restart > /dev/null && echo 'prompt:ok'
+    typeset -f _tmux_oc_detect_sid_from_tui > /dev/null && echo 'tui_detect:ok'
   ")
   echo "result: $result"
   [[ "$result" == *"capture:ok"* ]]
   [[ "$result" == *"restore_meta:ok"* ]]
   [[ "$result" == *"setup_pane:ok"* ]]
   [[ "$result" == *"prompt:ok"* ]]
+  [[ "$result" == *"tui_detect:ok"* ]]
 }
 
 @test "oc_capture_session prefers detected SID over title match" {
@@ -635,5 +637,544 @@ EOF
 
   [[ "$result" == *"T=keep-title"* ]]
   [[ "$result" == *"D=/keep/dir"* ]]
+  rm -rf "$fakebin"
+}
+
+# ── TUI-based SID detection tests ──────────────────────────────────────────
+
+@test "oc_detect_sid_from_tui matches session title in TUI content" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  local fake_db="$TMUX_ARCHIVE_DIR/test_oc.db"
+
+  cat > "$fakebin/tmux" << 'TMUX_EOF'
+#!/usr/bin/env bash
+if [ "$1" = "capture-pane" ]; then
+  cat << 'CONTENT'
+  Sessions
+  ● Fix auth bug in API
+  ▸ Refactor database layer
+  
+  Some TUI content here
+CONTENT
+  exit 0
+fi
+exit 0
+TMUX_EOF
+  chmod +x "$fakebin/tmux"
+
+  cat > "$fakebin/sqlite3" << SQLITE_EOF
+#!/usr/bin/env bash
+if echo "\$2" | grep -q "SELECT id, title"; then
+  echo "ses_auth001|Fix auth bug in API"
+  echo "ses_refac002|Refactor database layer"
+fi
+if echo "\$2" | grep -q "SELECT id FROM"; then
+  echo "ses_auth001"
+fi
+exit 0
+SQLITE_EOF
+  chmod +x "$fakebin/sqlite3"
+
+  # Create a fake DB file (just needs to exist)
+  touch "$fake_db"
+
+  result=$(zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export _TMUX_OC_DB='$fake_db'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_detect_sid_from_tui '%1' '/projects/myapp'
+  ")
+  echo "result: $result"
+  [ "$result" = "ses_auth001" ]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_detect_sid_from_tui matches second session when first doesn't appear in TUI" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  local fake_db="$TMUX_ARCHIVE_DIR/test_oc2.db"
+
+  cat > "$fakebin/tmux" << 'TMUX_EOF'
+#!/usr/bin/env bash
+if [ "$1" = "capture-pane" ]; then
+  cat << 'CONTENT'
+  Sessions
+  ▸ Refactor database layer
+  
+  Working on refactoring...
+CONTENT
+  exit 0
+fi
+exit 0
+TMUX_EOF
+  chmod +x "$fakebin/tmux"
+
+  cat > "$fakebin/sqlite3" << SQLITE_EOF
+#!/usr/bin/env bash
+if echo "\$2" | grep -q "SELECT id, title"; then
+  echo "ses_auth001|Fix auth bug in API"
+  echo "ses_refac002|Refactor database layer"
+fi
+if echo "\$2" | grep -q "SELECT id FROM"; then
+  echo "ses_auth001"
+fi
+exit 0
+SQLITE_EOF
+  chmod +x "$fakebin/sqlite3"
+
+  touch "$fake_db"
+
+  result=$(zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export _TMUX_OC_DB='$fake_db'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_detect_sid_from_tui '%1' '/projects/myapp'
+  ")
+  echo "result: $result"
+  [ "$result" = "ses_refac002" ]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_detect_sid_from_tui falls back to most recent session when no title matches" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  local fake_db="$TMUX_ARCHIVE_DIR/test_oc3.db"
+
+  cat > "$fakebin/tmux" << 'TMUX_EOF'
+#!/usr/bin/env bash
+if [ "$1" = "capture-pane" ]; then
+  echo "No matching content here at all"
+  exit 0
+fi
+exit 0
+TMUX_EOF
+  chmod +x "$fakebin/tmux"
+
+  cat > "$fakebin/sqlite3" << SQLITE_EOF
+#!/usr/bin/env bash
+if echo "\$2" | grep -q "SELECT id, title"; then
+  echo "ses_nomatch|Totally Different Title"
+fi
+if echo "\$2" | grep -q "SELECT id FROM"; then
+  echo "ses_fallback999"
+fi
+exit 0
+SQLITE_EOF
+  chmod +x "$fakebin/sqlite3"
+
+  touch "$fake_db"
+
+  result=$(zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export _TMUX_OC_DB='$fake_db'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_detect_sid_from_tui '%1' '/projects/myapp'
+  ")
+  echo "result: $result"
+  [ "$result" = "ses_fallback999" ]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_detect_sid_from_tui returns 1 when DB file missing" {
+  run zsh -c "
+    export _TMUX_OC_DB='/nonexistent/path/oc.db'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_detect_sid_from_tui '%1' '/projects/myapp'
+  "
+  [ "$status" -eq 1 ]
+}
+
+@test "oc_detect_sid_from_tui returns 1 when sqlite3 not available" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  local fake_db="$TMUX_ARCHIVE_DIR/test_oc_nosql.db"
+  touch "$fake_db"
+
+  # PATH with no sqlite3
+  run zsh -c "
+    export PATH='$fakebin'
+    export _TMUX_OC_DB='$fake_db'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_detect_sid_from_tui '%1' '/tmp'
+  "
+  [ "$status" -eq 1 ]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_capture_session detects bare opencode via OC_RUNNING and TUI matching" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  local fake_db="$TMUX_ARCHIVE_DIR/test_oc_bare.db"
+
+  cat > "$fakebin/tmux" << 'TMUX_EOF'
+#!/usr/bin/env bash
+if [ "$1" = "list-panes" ]; then
+  echo "%1"
+  exit 0
+fi
+if [ "$1" = "display-message" ] && [ "$2" = "-p" ] && [ "$3" = "-t" ] && [ "$4" = "%1" ]; then
+  case "$5" in
+    '#{window_index}') echo "1" ;;
+    '#{pane_index}') echo "0" ;;
+    '#{pane_title}') echo "OpenCode" ;;
+    '#{pane_current_path}') echo "/projects/bane" ;;
+    '#{pane_pid}') echo "12345" ;;
+    *) echo "" ;;
+  esac
+  exit 0
+fi
+if [ "$1" = "capture-pane" ]; then
+  cat << 'CONTENT'
+  Sessions
+  ● Cloud Data Sync Fix
+  ▸ Auth Permission Issue
+CONTENT
+  exit 0
+fi
+exit 0
+TMUX_EOF
+  chmod +x "$fakebin/tmux"
+
+  cat > "$fakebin/opencode" << 'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "session" ] && [ "$2" = "list" ] && [ "$3" = "--format" ] && [ "$4" = "json" ]; then
+  echo '[{"id":"ses_cloud777","title":"Cloud Data Sync Fix","directory":"/projects/bane"},{"id":"ses_auth888","title":"Auth Permission Issue","directory":"/projects/bane"}]'
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$fakebin/opencode"
+
+  cat > "$fakebin/sqlite3" << SQLITE_EOF
+#!/usr/bin/env bash
+if echo "\$2" | grep -q "SELECT id, title"; then
+  echo "ses_cloud777|Cloud Data Sync Fix"
+  echo "ses_auth888|Auth Permission Issue"
+fi
+if echo "\$2" | grep -q "SELECT id FROM"; then
+  echo "ses_cloud777"
+fi
+exit 0
+SQLITE_EOF
+  chmod +x "$fakebin/sqlite3"
+
+  touch "$fake_db"
+
+  local out_file="$TMUX_ARCHIVE_DIR/oc_capture_bare.archive"
+  local base="$TMUX_ARCHIVE_DIR/oc_capture_bare"
+  local pane_file="${base}_w1_p0.pane"
+  : > "$pane_file"
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export _TMUX_OC_DB='$fake_db'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_capture_session 'test-session' '$out_file' '$base'
+  "
+  [ "$status" -eq 0 ]
+
+  local line
+  line=$(cat "$out_file")
+  echo "line: $line"
+  [[ "$line" == *"|ses_cloud777|"* ]]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_capture_session detects OpenCode title without OC | prefix" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  local fake_db="$TMUX_ARCHIVE_DIR/test_oc_title.db"
+
+  cat > "$fakebin/tmux" << 'TMUX_EOF'
+#!/usr/bin/env bash
+if [ "$1" = "list-panes" ]; then
+  echo "%1"
+  exit 0
+fi
+if [ "$1" = "display-message" ] && [ "$2" = "-p" ] && [ "$3" = "-t" ] && [ "$4" = "%1" ]; then
+  case "$5" in
+    '#{window_index}') echo "1" ;;
+    '#{pane_index}') echo "0" ;;
+    '#{pane_title}') echo "OpenCode" ;;
+    '#{pane_current_path}') echo "/projects/static" ;;
+    '#{pane_pid}') echo "99999" ;;
+    *) echo "" ;;
+  esac
+  exit 0
+fi
+if [ "$1" = "capture-pane" ]; then
+  cat << 'CONTENT'
+  Sessions
+  ● Static Data Access
+CONTENT
+  exit 0
+fi
+exit 0
+TMUX_EOF
+  chmod +x "$fakebin/tmux"
+
+  cat > "$fakebin/opencode" << 'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "session" ] && [ "$2" = "list" ] && [ "$3" = "--format" ] && [ "$4" = "json" ]; then
+  echo '[{"id":"ses_static111","title":"Static Data Access","directory":"/projects/static"}]'
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$fakebin/opencode"
+
+  cat > "$fakebin/sqlite3" << SQLITE_EOF
+#!/usr/bin/env bash
+if echo "\$2" | grep -q "SELECT id, title"; then
+  echo "ses_static111|Static Data Access"
+fi
+if echo "\$2" | grep -q "SELECT id FROM"; then
+  echo "ses_static111"
+fi
+exit 0
+SQLITE_EOF
+  chmod +x "$fakebin/sqlite3"
+
+  touch "$fake_db"
+
+  local out_file="$TMUX_ARCHIVE_DIR/oc_capture_oc_title.archive"
+  local base="$TMUX_ARCHIVE_DIR/oc_capture_oc_title"
+  local pane_file="${base}_w1_p0.pane"
+  : > "$pane_file"
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export _TMUX_OC_DB='$fake_db'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_capture_session 'test-session' '$out_file' '$base'
+  "
+  [ "$status" -eq 0 ]
+
+  local line
+  line=$(cat "$out_file")
+  echo "line: $line"
+  [[ "$line" == *"|ses_static111|"* ]]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_capture_session handles switched session (TUI shows different session than -s arg)" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  local fake_db="$TMUX_ARCHIVE_DIR/test_oc_switched.db"
+
+  cat > "$fakebin/tmux" << 'TMUX_EOF'
+#!/usr/bin/env bash
+if [ "$1" = "list-panes" ]; then
+  echo "%1"
+  exit 0
+fi
+if [ "$1" = "display-message" ] && [ "$2" = "-p" ] && [ "$3" = "-t" ] && [ "$4" = "%1" ]; then
+  case "$5" in
+    '#{window_index}') echo "1" ;;
+    '#{pane_index}') echo "0" ;;
+    '#{pane_title}') echo "OpenCode" ;;
+    '#{pane_current_path}') echo "/projects/app" ;;
+    '#{pane_pid}') echo "55555" ;;
+    *) echo "" ;;
+  esac
+  exit 0
+fi
+if [ "$1" = "capture-pane" ]; then
+  cat << 'CONTENT'
+  Sessions
+  ● New Feature Work
+  ▸ Old Started Session
+CONTENT
+  exit 0
+fi
+exit 0
+TMUX_EOF
+  chmod +x "$fakebin/tmux"
+
+  cat > "$fakebin/opencode" << 'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "session" ] && [ "$2" = "list" ] && [ "$3" = "--format" ] && [ "$4" = "json" ]; then
+  echo '[{"id":"ses_old000","title":"Old Started Session","directory":"/projects/app"},{"id":"ses_new111","title":"New Feature Work","directory":"/projects/app"}]'
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$fakebin/opencode"
+
+  cat > "$fakebin/sqlite3" << SQLITE_EOF
+#!/usr/bin/env bash
+if echo "\$2" | grep -q "SELECT id, title"; then
+  echo "ses_new111|New Feature Work"
+  echo "ses_old000|Old Started Session"
+fi
+if echo "\$2" | grep -q "SELECT id FROM"; then
+  echo "ses_new111"
+fi
+exit 0
+SQLITE_EOF
+  chmod +x "$fakebin/sqlite3"
+
+  touch "$fake_db"
+
+  local out_file="$TMUX_ARCHIVE_DIR/oc_capture_switched.archive"
+  local base="$TMUX_ARCHIVE_DIR/oc_capture_switched"
+  local pane_file="${base}_w1_p0.pane"
+  # Pane file has the OLD session from -s arg
+  echo "opencode -s ses_old000" > "$pane_file"
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export _TMUX_OC_DB='$fake_db'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_capture_session 'test-session' '$out_file' '$base'
+  "
+  [ "$status" -eq 0 ]
+
+  local line
+  line=$(cat "$out_file")
+  echo "line: $line"
+  # TUI-based detection should pick the ACTIVE session (New Feature Work), not the -s arg one
+  [[ "$line" == *"|ses_new111|"* ]]
+  [[ "$line" != *"|ses_old000|"* ]]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_capture_session with OC_RUNNING marker in ps cache" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  local fake_db="$TMUX_ARCHIVE_DIR/test_oc_psmarker.db"
+  local ps_cache="$TMUX_ARCHIVE_DIR/test_ps_cache"
+
+  cat > "$fakebin/tmux" << 'TMUX_EOF'
+#!/usr/bin/env bash
+if [ "$1" = "list-panes" ]; then
+  echo "%1"
+  exit 0
+fi
+if [ "$1" = "display-message" ] && [ "$2" = "-p" ] && [ "$3" = "-t" ] && [ "$4" = "%1" ]; then
+  case "$5" in
+    '#{window_index}') echo "1" ;;
+    '#{pane_index}') echo "0" ;;
+    '#{pane_title}') echo "zsh" ;;
+    '#{pane_current_path}') echo "/projects/bare" ;;
+    '#{pane_pid}') echo "77777" ;;
+    *) echo "" ;;
+  esac
+  exit 0
+fi
+if [ "$1" = "capture-pane" ]; then
+  cat << 'CONTENT'
+  Sessions
+  ● Bare OC Session
+CONTENT
+  exit 0
+fi
+exit 0
+TMUX_EOF
+  chmod +x "$fakebin/tmux"
+
+  cat > "$fakebin/opencode" << 'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "session" ] && [ "$2" = "list" ] && [ "$3" = "--format" ] && [ "$4" = "json" ]; then
+  echo '[{"id":"ses_bare555","title":"Bare OC Session","directory":"/projects/bare"}]'
+  exit 0
+fi
+exit 0
+EOF
+  chmod +x "$fakebin/opencode"
+
+  cat > "$fakebin/sqlite3" << SQLITE_EOF
+#!/usr/bin/env bash
+if echo "\$2" | grep -q "SELECT id, title"; then
+  echo "ses_bare555|Bare OC Session"
+fi
+if echo "\$2" | grep -q "SELECT id FROM"; then
+  echo "ses_bare555"
+fi
+exit 0
+SQLITE_EOF
+  chmod +x "$fakebin/sqlite3"
+
+  touch "$fake_db"
+
+  printf '77777\tOC_RUNNING\n' > "$ps_cache"
+
+  local out_file="$TMUX_ARCHIVE_DIR/oc_capture_psmarker.archive"
+  local base="$TMUX_ARCHIVE_DIR/oc_capture_psmarker"
+  local pane_file="${base}_w1_p0.pane"
+  : > "$pane_file"
+
+  run zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export _TMUX_OC_DB='$fake_db'
+    export _TMUX_OC_PS_CACHE='$ps_cache'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_capture_session 'test-session' '$out_file' '$base'
+  "
+  [ "$status" -eq 0 ]
+
+  local line
+  line=$(cat "$out_file")
+  echo "line: $line"
+  [[ "$line" == *"|ses_bare555|"* ]]
+
+  rm -rf "$fakebin"
+}
+
+@test "oc_detect_sid_from_tui uses index cache when DB has no match" {
+  local fakebin
+  fakebin=$(mktemp -d -t tmux_oc_fakebin)
+  local fake_db="$TMUX_ARCHIVE_DIR/test_oc_idxcache.db"
+  local idx_cache="$TMUX_ARCHIVE_DIR/test_idx_cache"
+
+  cat > "$fakebin/tmux" << 'TMUX_EOF'
+#!/usr/bin/env bash
+if [ "$1" = "capture-pane" ]; then
+  cat << 'CONTENT'
+  Sessions
+  ● Cached Session Title
+CONTENT
+  exit 0
+fi
+exit 0
+TMUX_EOF
+  chmod +x "$fakebin/tmux"
+
+  cat > "$fakebin/sqlite3" << SQLITE_EOF
+#!/usr/bin/env bash
+# DB returns no matches for this directory
+if echo "\$2" | grep -q "SELECT id, title"; then
+  exit 0
+fi
+if echo "\$2" | grep -q "SELECT id FROM"; then
+  exit 0
+fi
+exit 0
+SQLITE_EOF
+  chmod +x "$fakebin/sqlite3"
+
+  touch "$fake_db"
+
+  # Index cache has the session
+  printf 'ses_cached999\tCached Session Title\t/projects/cached\n' > "$idx_cache"
+
+  result=$(zsh -c "
+    export PATH='$fakebin':\"\$PATH\"
+    export _TMUX_OC_DB='$fake_db'
+    export _TMUX_OC_INDEX_CACHE='$idx_cache'
+    source '$TMUX_MANAGER_DIR/plugins/opencode.sh'
+    _tmux_oc_detect_sid_from_tui '%1' '/projects/cached'
+  ")
+  echo "result: $result"
+  [ "$result" = "ses_cached999" ]
+
   rm -rf "$fakebin"
 }

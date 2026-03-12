@@ -20,6 +20,50 @@ _tmux_oc_detect_sid_from_pane() {
   echo "$sid"
 }
 
+_tmux_oc_detect_sid_from_tui() {
+  local pane_target="$1" pane_cwd="$2"
+  local OC_DB="${_TMUX_OC_DB:-/Users/gameduo/.local/share/opencode/opencode.db}"
+  [ -f "$OC_DB" ] || return 1
+  command -v sqlite3 &>/dev/null || return 1
+
+  local pane_content
+  pane_content=$(tmux capture-pane -t "$pane_target" -p -S 0 2>/dev/null) || return 1
+  [ -z "$pane_content" ] && return 1
+
+  local db_rows
+  db_rows=$(sqlite3 "$OC_DB" "SELECT id, title FROM session WHERE directory = '${pane_cwd//\'/\'\'}' ORDER BY time_updated DESC LIMIT 20;" 2>/dev/null)
+
+  if [ -n "$db_rows" ]; then
+    local sid title short
+    while IFS='|' read -r sid title; do
+      [ -z "$sid" ] || [ -z "$title" ] && continue
+      short="${title:0:30}"
+      if echo "$pane_content" | grep -qF "$short"; then
+        echo "$sid"
+        return 0
+      fi
+    done <<< "$db_rows"
+  fi
+
+  if [ -n "$_TMUX_OC_INDEX_CACHE" ] && [ -f "$_TMUX_OC_INDEX_CACHE" ]; then
+    while IFS=$'\t' read -r sid title dir; do
+      [ -z "$sid" ] || [ -z "$title" ] && continue
+      [ "$dir" != "$pane_cwd" ] && continue
+      short="${title:0:30}"
+      if echo "$pane_content" | grep -qF "$short"; then
+        echo "$sid"
+        return 0
+      fi
+    done < "$_TMUX_OC_INDEX_CACHE"
+  fi
+
+  local fallback_sid
+  fallback_sid=$(sqlite3 "$OC_DB" "SELECT id FROM session WHERE directory = '${pane_cwd//\'/\'\'}' ORDER BY time_updated DESC LIMIT 1;" 2>/dev/null)
+  [ -n "$fallback_sid" ] && echo "$fallback_sid" && return 0
+
+  return 1
+}
+
 _tmux_oc_capture_session() {
   local session="$1" file="$2" base="$3"
   command -v opencode &>/dev/null || return 0
@@ -54,21 +98,18 @@ except: pass' 2>/dev/null)
       { pid=$1+0; ppid=$2+0; $1=""; $2=""; a[pid]=$0; p[pid]=ppid }
       END {
         for(rt in root) {
-          queue[1]=rt; head=1; tail=1; found=""
-          while(head<=tail && found=="") {
+          queue[1]=rt; head=1; tail=1; found=0
+          while(head<=tail && !found) {
             for(pid in p) {
               if(p[pid]==queue[head]) {
                 tail++; queue[tail]=pid
-                if(a[pid] ~ /opencode.*-s ses_/) {
-                  match(a[pid], /ses_[A-Za-z0-9]+/)
-                  if(RSTART>0) found=substr(a[pid],RSTART,RLENGTH)
-                }
+                if(a[pid] ~ /[[:space:]]opencode([[:space:]]|$)/ && a[pid] !~ /eslint/) found=1
               }
             }
             head++
           }
           delete queue
-          if(found!="") print rt "\t" found
+          if(found) print rt "\tOC_RUNNING"
         }
       }' 2>/dev/null)
   fi
@@ -84,26 +125,36 @@ except: pass' 2>/dev/null)
     _ppath=$(tmux display-message -p -t "$_pid" '#{pane_current_path}' 2>/dev/null)
 
     local pane_file="${base}_w${_widx}_p${_pidx}.pane"
-    local detected_sid=''
-    detected_sid=$(_tmux_oc_detect_sid_from_pane "$pane_file")
-    local ps_sid=''
-    local pane_pid=$(tmux display-message -p -t "$_pid" '#{pane_pid}' 2>/dev/null)
-    [ -n "$pane_pid" ] && [ -n "$_oc_ps" ] && ps_sid=$(echo "$_oc_ps" | awk -F'\t' -v p="$pane_pid" '$1+0==p+0 {print $2; exit}')
 
-    if [[ "$_title" == "OC |"* ]]; then
-      local oc_title="${_title#OC | }"
-      local oc_sid="$ps_sid"
-      [ -z "$oc_sid" ] && [ -n "$_oc_idx" ] && oc_sid=$(echo "$_oc_idx" | awk -F'\t' -v t="$oc_title" '$2==t {print $1; exit}')
-      [ -z "$oc_sid" ] && oc_sid="$detected_sid"
+    local is_oc_running=false
+    local pane_pid=$(tmux display-message -p -t "$_pid" '#{pane_pid}' 2>/dev/null)
+    [ -n "$pane_pid" ] && [ -n "$_oc_ps" ] && \
+      echo "$_oc_ps" | awk -F'\t' -v p="$pane_pid" '$1+0==p+0 {found=1} END{exit !found}' && is_oc_running=true
+
+    [[ "$_title" == "OC |"* ]] && is_oc_running=true
+    [[ "$_title" == "OpenCode" ]] && is_oc_running=true
+
+    if [ "$is_oc_running" = true ]; then
+      local oc_sid=''
+      oc_sid=$(_tmux_oc_detect_sid_from_tui "$_pid" "$_ppath" 2>/dev/null) || true
+
+      if [ -z "$oc_sid" ]; then
+        oc_sid=$(_tmux_oc_detect_sid_from_pane "$pane_file" 2>/dev/null) || true
+      fi
+
+      local oc_title='(detected)'
       local oc_dir="$_ppath"
       if [ -n "$oc_sid" ] && [ -n "$_oc_idx" ]; then
-        local _meta=$(echo "$_oc_idx" | awk -F'\t' -v s="$oc_sid" '$1==s {print $2; print $3; exit}')
+        local _meta=$(echo "$_oc_idx" | awk -F'\t' -v s="$oc_sid" '$1==s {print $2 "\t" $3; exit}')
         if [ -n "$_meta" ]; then
-          local _et="${_meta%%$'\n'*}"
-          local _ed="${_meta#*$'\n'}"
+          local _et="${_meta%%$'\t'*}"
+          local _ed="${_meta#*$'\t'}"
           [ -n "$_et" ] && oc_title="$_et"
           [ -n "$_ed" ] && oc_dir="$_ed"
         fi
+      fi
+      if [[ "$_title" == "OC |"* ]] && [ "$oc_title" = '(detected)' ]; then
+        oc_title="${_title#OC | }"
       fi
       if [ "$fmt" -ge 2 ] 2>/dev/null; then
         oc_sid=$(_tmux_af_escape "$oc_sid")
@@ -111,25 +162,6 @@ except: pass' 2>/dev/null)
         oc_dir=$(_tmux_af_escape "$oc_dir")
       fi
       echo "${_widx}|${_pidx}|${oc_sid}|${oc_title}|${oc_dir}" >> "$file"
-    elif [ -n "$ps_sid" ] || [ -n "$detected_sid" ]; then
-      local found_sid="${ps_sid:-$detected_sid}"
-      local fallback_title='(detected)'
-      local fallback_dir="$_ppath"
-      if [ -n "$_oc_idx" ]; then
-        local _meta=$(echo "$_oc_idx" | awk -F'\t' -v s="$found_sid" '$1==s {print $2; print $3; exit}')
-        if [ -n "$_meta" ]; then
-          local _et="${_meta%%$'\n'*}"
-          local _ed="${_meta#*$'\n'}"
-          [ -n "$_et" ] && fallback_title="$_et"
-          [ -n "$_ed" ] && fallback_dir="$_ed"
-        fi
-      fi
-      if [ "$fmt" -ge 2 ] 2>/dev/null; then
-        found_sid=$(_tmux_af_escape "$found_sid")
-        fallback_title=$(_tmux_af_escape "$fallback_title")
-        fallback_dir=$(_tmux_af_escape "$fallback_dir")
-      fi
-      echo "${_widx}|${_pidx}|${found_sid}|${fallback_title}|${fallback_dir}" >> "$file"
     fi
   done
 }

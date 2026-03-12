@@ -355,24 +355,22 @@ except: pass' > "$_TMUX_OC_INDEX_CACHE" 2>/dev/null || true
         { pid=$1+0; ppid=$2+0; $1=""; $2=""; a[pid]=$0; p[pid]=ppid }
         END {
           for(rt in root) {
-            queue[1]=rt; head=1; tail=1; found=""
-            while(head<=tail && found=="") {
+            queue[1]=rt; head=1; tail=1; found=0
+            while(head<=tail && !found) {
               for(pid in p) {
                 if(p[pid]==queue[head]) {
                   tail++; queue[tail]=pid
-                  if(a[pid] ~ /opencode.*-s ses_/) {
-                    match(a[pid], /ses_[A-Za-z0-9]+/)
-                    if(RSTART>0) found=substr(a[pid],RSTART,RLENGTH)
-                  }
+                  if(a[pid] ~ /[[:space:]]opencode([[:space:]]|$)/ && a[pid] !~ /eslint/) found=1
                 }
               }
               head++
             }
             delete queue
-            if(found!="") print rt "\t" found
+            if(found) print rt "\tOC_RUNNING"
           }
         }' > "$_TMUX_OC_PS_CACHE" 2>/dev/null || true
     fi
+    export _TMUX_OC_DB="/Users/gameduo/.local/share/opencode/opencode.db"
   fi
   echo "$sessions" | while read -r s; do
     _tmux_ensure_uuid "$s" >/dev/null
