@@ -791,3 +791,81 @@ EOF
   ")
   [[ "$result" == *"restore-at"* ]]
 }
+
+# ── save-all tests ──────────────────────────────────────────────────────────
+
+@test "save-all shows header banner" {
+  run zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    export TMUX_ARCHIVE_DIR='$TMUX_ARCHIVE_DIR'
+    tmux-archive save-all 2>&1
+  "
+  [[ "$output" == *"전체 세션 아카이브"* ]]
+}
+
+@test "save-all shows no-session message when tmux not running" {
+  run zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    export TMUX_ARCHIVE_DIR='$TMUX_ARCHIVE_DIR'
+    # tmux ls will fail in test env → empty sessions
+    tmux-archive save-all 2>&1
+  "
+  # Should either show '활성 세션 없음' (no tmux) or '전체 아카이브 완료' (if tmux running)
+  [[ "$output" == *"활성 세션 없음"* ]] || [[ "$output" == *"전체 아카이브 완료"* ]]
+}
+
+@test "save-all appears in help text" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    tmux-archive help 2>&1 || tmux-archive 2>&1
+  ")
+  [[ "$result" == *"save-all"* ]]
+  [[ "$result" == *"전체 세션 즉시 아카이브"* ]]
+}
+
+# ── save-all-and-kill tests ─────────────────────────────────────────────────
+
+@test "save-all-and-kill shows header banner" {
+  run zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    export TMUX_ARCHIVE_DIR='$TMUX_ARCHIVE_DIR'
+    tmux-archive save-all-and-kill 2>&1
+  "
+  [[ "$output" == *"전체 아카이브 후 종료"* ]]
+}
+
+@test "save-all-and-kill shows no-session message when tmux not running" {
+  run zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    export TMUX_ARCHIVE_DIR='$TMUX_ARCHIVE_DIR'
+    tmux-archive save-all-and-kill 2>&1
+  "
+  [[ "$output" == *"활성 세션 없음"* ]] || [[ "$output" == *"전체 아카이브 완료"* ]]
+}
+
+@test "save-all-and-kill appears in help text" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/lib/utils.sh'
+    source '$TMUX_MANAGER_DIR/lib/core.sh'
+    tmux-archive help 2>&1 || tmux-archive 2>&1
+  ")
+  [[ "$result" == *"save-all-and-kill"* ]]
+  [[ "$result" == *"전체 아카이브 후 tmux 종료"* ]]
+}

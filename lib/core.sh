@@ -605,6 +605,37 @@ tmux-archive() {
       fi
       _tmux_archive_delete_file "$file"
       ;;
+    save-all)
+      echo "\033[1;36m━━━ 전체 세션 아카이브 ━━━\033[0m"
+      local sessions=$(tmux ls -F '#{session_name}' 2>/dev/null)
+      if [ -z "$sessions" ]; then
+        echo "\033[90m활성 세션 없음\033[0m"
+        return
+      fi
+      local cnt=$(echo "$sessions" | wc -l | tr -d ' ')
+      echo "\033[90m대상: ${cnt}개 세션\033[0m"
+      echo ''
+      _tmux_autoarchive_all
+      echo "\033[32m✓ 전체 아카이브 완료 (${cnt}개)\033[0m"
+      ;;
+    save-all-and-kill)
+      echo "\033[1;33m━━━ 전체 아카이브 후 종료 ━━━\033[0m"
+      local sessions=$(tmux ls -F '#{session_name}' 2>/dev/null)
+      if [ -z "$sessions" ]; then
+        echo "\033[90m활성 세션 없음\033[0m"
+        return
+      fi
+      local cnt=$(echo "$sessions" | wc -l | tr -d ' ')
+      echo "\033[90m대상: ${cnt}개 세션\033[0m"
+      echo ''
+      _tmux_autoarchive_all
+      echo "\033[32m✓ 전체 아카이브 완료 (${cnt}개)\033[0m"
+      echo ''
+      echo "\033[33m⚠ tmux 서버 종료 중...\033[0m"
+      tmux kill-server 2>/dev/null
+      echo "\033[31m✓ tmux 서버 종료됨\033[0m"
+      echo "\033[90m복구: tmux-archive restore-last 또는 tmux-archive restore-at <시간>\033[0m"
+      ;;
     restore-at)
       setopt local_options nonomatch null_glob typeset_silent
       local raw_ts="$2"
@@ -727,6 +758,8 @@ tmux-archive() {
       echo 'tmux-archive <command>'
       echo ''
       echo '  save [session]         세션 아카이브 저장'
+      echo '  save-all               전체 세션 즉시 아카이브'
+      echo '  save-all-and-kill      전체 아카이브 후 tmux 종료'
       echo '  save-and-kill [session] 아카이브 저장 후 세션 종료'
       echo '  restore [file]         아카이브에서 복원'
       echo '  restore-last           마지막 활성 세션 일괄 복원'
