@@ -72,18 +72,30 @@ _tmux_archive_restore_unlocked() {
     return 1
   fi
 
-  tmux new-session -d -s "$session_name" || {
-    echo "\033[31m복원 실패: 세션 생성 실패\033[0m"
-    return 1
-  }
-  local created_session=1
-
   local first_row
   first_row=$(echo "$windows_sorted" | head -1)
   local first_idx first_name first_layout
   IFS='|' read -r first_idx first_name first_layout <<< "$first_row"
   first_name=$(_tmux_af_decode_field_if_needed "$fmt" "$first_name")
   first_layout=$(_tmux_af_decode_field_if_needed "$fmt" "$first_layout")
+
+  local _restore_w=200 _restore_h=200
+  local _raw_layout
+  while IFS='|' read -r _ _ _raw_layout; do
+    [ -z "$_raw_layout" ] && continue
+    _raw_layout=$(_tmux_af_decode_field_if_needed "$fmt" "$_raw_layout")
+    local _lw _lh
+    _lw=$(echo "$_raw_layout" | grep -oE '^[0-9a-fA-F]+,[0-9]+x[0-9]+' | head -1 | sed 's/.*,//;s/x.*//')
+    _lh=$(echo "$_raw_layout" | grep -oE '^[0-9a-fA-F]+,[0-9]+x[0-9]+' | head -1 | sed 's/.*x//;s/,.*//')
+    [ -n "$_lw" ] && [ "$_lw" -gt "$_restore_w" ] 2>/dev/null && _restore_w="$_lw"
+    [ -n "$_lh" ] && [ "$_lh" -gt "$_restore_h" ] 2>/dev/null && _restore_h="$_lh"
+  done <<< "$windows_sorted"
+
+  tmux new-session -d -s "$session_name" -x "$_restore_w" -y "$_restore_h" || {
+    echo "\033[31m복원 실패: 세션 생성 실패\033[0m"
+    return 1
+  }
+  local created_session=1
 
   tmux rename-window -t "$session_name" "$first_name" 2>/dev/null || \
     echo "\033[33m⚠ 첫 윈도우 이름 적용 실패 (기본 이름 유지)\033[0m"
@@ -144,9 +156,8 @@ _tmux_archive_restore_unlocked() {
       ppath=$(_tmux_af_decode_field_if_needed "$fmt" "$ppath")
       if [ "$pane_seq" -gt 1 ]; then
         tmux split-window -d -t "${session_name}:${widx}" -c "$ppath" 2>/dev/null || {
-          echo "\033[31m복원 실패: pane split 실패 (${widx}.${pidx})\033[0m"
-          [ "$created_session" -eq 1 ] && tmux kill-session -t "=$session_name" 2>/dev/null
-          return 1
+          echo "\033[33m⚠ pane split 실패 (w${widx}.p${pidx}) — 공간 부족, 건너뜀\033[0m"
+          continue
         }
       fi
     done <<< "$window_panes"
