@@ -1041,22 +1041,44 @@ tmux-manager() {
           ;;
         2) _tmux_archive_manager ;;
         3)
-          local time_list=$( for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
+          local date_list=$( for f in "$TMUX_ARCHIVE_DIR"/*.archive; do
               [ -f "$f" ] || continue
               echo "$f"
-            done | sed 's/.*_\([0-9]\{8\}_[0-9]\{4\}\)[0-9]*.archive/\1/' \
-            | sort -u | while read -r t; do
-              local d="${t:0:4}-${t:4:2}-${t:6:2} ${t:9:2}:${t:11:2}"
+            done | sed 's/.*_\([0-9]\{8\}\)_[0-9]*.archive/\1/' \
+            | sort -u | while read -r d; do
+              local fmt="${d:0:4}-${d:4:2}-${d:6:2}"
               local cnt=0
-              # shellcheck disable=SC2231
-              for _f in "$TMUX_ARCHIVE_DIR"/*_${t}*.archive; do
+              for _f in "$TMUX_ARCHIVE_DIR"/*_${d}_*.archive; do
                 [ -f "$_f" ] && cnt=$((cnt + 1))
               done
-              printf '%s|%s  (%s개 세션)\n' "$t" "$d" "$cnt"
+              local times=$(for _f in "$TMUX_ARCHIVE_DIR"/*_${d}_*.archive; do
+                [ -f "$_f" ] || continue
+                echo "$_f"
+              done | sed 's/.*_[0-9]\{8\}_\([0-9]\{4\}\)[0-9]*.archive/\1/' | sort -u | wc -l | tr -d ' ')
+              printf '%s|%s  (%s개 아카이브, %s개 시점)\n' "$d" "$fmt" "$cnt" "$times"
             done )
-          [ -z "$time_list" ] && { echo "\033[31m복원 가능한 아카이브 없음\033[0m"; return; }
+          [ -z "$date_list" ] && { echo "\033[31m복원 가능한 아카이브 없음\033[0m"; return; }
+          local sel_date
+          sel_date=$(echo "$date_list" | fzf --height=40% --reverse --header='복원할 날짜 선택' \
+            -d'|' --with-nth=2 --tac | cut -d'|' -f1)
+          [ -z "$sel_date" ] && return
+          local time_list=$( for f in "$TMUX_ARCHIVE_DIR"/*_${sel_date}_*.archive; do
+              [ -f "$f" ] || continue
+              echo "$f"
+            done | sed "s/.*_${sel_date}_\([0-9]\{4\}\)[0-9]*.archive/\1/" \
+            | sort -u | while read -r t; do
+              local ts="${sel_date}_${t}"
+              local fmt="${sel_date:0:4}-${sel_date:4:2}-${sel_date:6:2} ${t:0:2}:${t:2:2}"
+              local cnt=0
+              # shellcheck disable=SC2231
+              for _f in "$TMUX_ARCHIVE_DIR"/*_${ts}*.archive; do
+                [ -f "$_f" ] && cnt=$((cnt + 1))
+              done
+              printf '%s|%s  (%s개 세션)\n' "$ts" "$fmt" "$cnt"
+            done )
+          [ -z "$time_list" ] && { echo "\033[31m해당 날짜에 복원 가능한 시점 없음\033[0m"; return; }
           local selected
-          selected=$(echo "$time_list" | fzf --height=40% --reverse --header='복원할 시점 선택 (최신이 아래)' \
+          selected=$(echo "$time_list" | fzf --height=40% --reverse --header='복원할 시점 선택' \
             -d'|' --with-nth=2 --tac | cut -d'|' -f1)
           [ -z "$selected" ] && return
           tmux-archive restore-at "$selected"
