@@ -27,7 +27,7 @@ if [[ -n "$TMUX" ]] && [[ -t 0 ]]; then
   source "$TMUX_MANAGER_DIR/hooks/tmux-hooks.conf"
 fi
 
-# Auto-launch session manager on terminal open
-if command -v tmux &>/dev/null && [ -z "$TMUX" ] && [[ -t 0 ]]; then
+# Auto-launch session manager on terminal open (opt-in via TMUX_MANAGER_AUTO_LAUNCH=1)
+if [[ "$TMUX_MANAGER_AUTO_LAUNCH" == '1' ]] && command -v tmux &>/dev/null && [ -z "$TMUX" ] && [[ -t 0 ]] && command -v fzf &>/dev/null; then
   tmux-manager
 fi

@@ -778,6 +778,8 @@ tmux-archive() {
 _tmux_archive_manager() {
   setopt local_options nonomatch null_glob typeset_silent
   while true; do
+    # Safety: break if terminal is no longer interactive
+    [[ -t 0 ]] || break
     local archive_files=("$TMUX_ARCHIVE_DIR"/*.archive)
     local archive_count="${#archive_files[@]}"
     clear
@@ -890,6 +892,8 @@ _tmux_archive_level2() {
   local target_uuid="$1"
   local group_name="$2"
   while true; do
+    # Safety: break if terminal is no longer interactive
+    [[ -t 0 ]] || break
     clear
     echo '\033[1;34m━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\033[0m'
     echo '\033[1;34m  📦 '"$group_name"'\033[0m'
@@ -1099,6 +1103,8 @@ tmux-manager() {
     return
   fi
   while true; do
+    # Safety: break if terminal is no longer interactive
+    [[ -t 0 ]] || break
     clear
     local total=$(tmux ls | wc -l | tr -d ' ')
     local archive_files_loop=("$TMUX_ARCHIVE_DIR"/*.archive)

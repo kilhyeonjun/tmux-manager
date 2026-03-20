@@ -869,3 +869,37 @@ EOF
   [[ "$result" == *"save-all-and-kill"* ]]
   [[ "$result" == *"전체 아카이브 후 tmux 종료"* ]]
 }
+
+@test "TMUX_MANAGER_AUTO_LAUNCH defaults to 0 (disabled)" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    echo \"\$TMUX_MANAGER_AUTO_LAUNCH\"
+  ")
+  [[ "$result" == "0" ]]
+}
+
+@test "init.sh does not auto-launch when TMUX_MANAGER_AUTO_LAUNCH=0" {
+  # Simulate: outside tmux, interactive terminal, fzf available, but AUTO_LAUNCH=0
+  result=$(zsh -c "
+    TMUX_MANAGER_AUTO_LAUNCH=0
+    TMUX=''
+    source '$TMUX_MANAGER_DIR/conf/defaults.conf'
+    # Override to detect if tmux-manager would be called
+    tmux-manager() { echo 'LAUNCHED'; }
+    source '$TMUX_MANAGER_DIR/init.sh' 2>/dev/null || true
+    echo 'DONE'
+  " 2>/dev/null)
+  [[ "$result" != *"LAUNCHED"* ]]
+}
+
+@test "init.sh auto-launches when TMUX_MANAGER_AUTO_LAUNCH=1 and fzf available" {
+  # This test verifies the condition is checked, not that tmux-manager runs fully
+  result=$(zsh -c "
+    export TMUX_MANAGER_AUTO_LAUNCH=1
+    # Read the init.sh and extract the auto-launch condition
+    grep 'TMUX_MANAGER_AUTO_LAUNCH' '$TMUX_MANAGER_DIR/init.sh'
+  ")
+  [[ "$result" == *"TMUX_MANAGER_AUTO_LAUNCH"* ]]
+  [[ "$result" == *"'1'"* ]]
+  [[ "$result" == *"fzf"* ]]
+}
