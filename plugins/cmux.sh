@@ -55,6 +55,31 @@ _tmux_cmux_notify_restore_fail() {
   _tmux_cmux_notify "Restore Failed" "$reason" --urgency critical
 }
 
+# ── Workspace rename ──────────────────────────────────────────────────
+# Rename the cmux workspace tab to match the tmux session name.
+# Optionally appends git branch info when available.
+_tmux_cmux_rename_workspace() {
+  _tmux_cmux_is_inside || return 0
+  _tmux_cmux_has_cli || return 0
+  local name="$1"
+  [ -z "$name" ] && return 0
+  cmux rename-workspace "$name" 2>/dev/null || true
+}
+
+# Build a workspace label from session name + optional git branch.
+_tmux_cmux_workspace_label() {
+  local session_name="$1" cwd="$2"
+  local label="$session_name"
+  if [ -n "$cwd" ]; then
+    local branch
+    branch=$(git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)
+    if [ -n "$branch" ]; then
+      label="${session_name} (${branch})"
+    fi
+  fi
+  echo "$label"
+}
+
 # ── Capture ────────────────────────────────────────────────────────────────
 # Append cmux workspace metadata to the archive file's ---CMUX--- section.
 # Called from lib/core.sh during `tmux-archive save`.

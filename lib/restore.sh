@@ -248,6 +248,13 @@ _tmux_archive_restore_unlocked() {
   if typeset -f _tmux_cmux_notify_restore > /dev/null 2>&1; then
     _tmux_cmux_notify_restore "$session_name"
   fi
+  if typeset -f _tmux_cmux_rename_workspace > /dev/null 2>&1; then
+    local _restore_cwd
+    _restore_cwd=$(tmux display-message -t "$session_name" -p '#{pane_current_path}' 2>/dev/null)
+    local _restore_label
+    _restore_label=$(_tmux_cmux_workspace_label "$session_name" "$_restore_cwd")
+    _tmux_cmux_rename_workspace "$_restore_label"
+  fi
   if [ -n "$running_cmds" ]; then
     echo "\033[33m⚠ 다음 프로세스는 수동 재시작 필요:\033[0m"
     echo -e "$running_cmds"

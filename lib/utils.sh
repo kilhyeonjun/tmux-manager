@@ -9,11 +9,20 @@ _tmux_sanitize_name() {
 _tmux_enter_session() {
   local session_name="$1"
   [ -z "$session_name" ] && return 1
+  local result=1
   if [ -n "$TMUX" ]; then
-    tmux switch-client -t "$session_name" 2>/dev/null
+    tmux switch-client -t "$session_name" 2>/dev/null && result=0
   else
-    tmux attach -t "$session_name" 2>/dev/null
+    tmux attach -t "$session_name" 2>/dev/null && result=0
   fi
+  if [ "$result" -eq 0 ] && typeset -f _tmux_cmux_rename_workspace > /dev/null 2>&1; then
+    local cwd
+    cwd=$(tmux display-message -t "$session_name" -p '#{pane_current_path}' 2>/dev/null)
+    local label
+    label=$(_tmux_cmux_workspace_label "$session_name" "$cwd")
+    _tmux_cmux_rename_workspace "$label"
+  fi
+  return "$result"
 }
 
 _tmux_archive_safe_name() {
