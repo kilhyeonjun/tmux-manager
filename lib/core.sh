@@ -1151,9 +1151,8 @@ tmux-manager() {
         1)
           local name
           name=$(_tmux_prompt_new_session_name)
-          local _cmux_flags=''
-          typeset -f _tmux_cmux_server_flags > /dev/null 2>&1 && _cmux_flags=$(_tmux_cmux_server_flags)
-          tmux ${_cmux_flags} new -s "$name"
+          typeset -f _tmux_cmux_ensure_server > /dev/null 2>&1 && _tmux_cmux_ensure_server
+          tmux new -s "$name"
           ;;
         2) _tmux_archive_manager ;;
         3)
@@ -1210,9 +1209,8 @@ tmux-manager() {
       echo ''
       local name
       name=$(_tmux_prompt_new_session_name)
-      local _cmux_flags=''
-      typeset -f _tmux_cmux_server_flags > /dev/null 2>&1 && _cmux_flags=$(_tmux_cmux_server_flags)
-      tmux ${_cmux_flags} new -s "$name"
+      typeset -f _tmux_cmux_ensure_server > /dev/null 2>&1 && _tmux_cmux_ensure_server
+      tmux new -s "$name"
     fi
     return
   fi
@@ -1291,9 +1289,8 @@ tmux-manager() {
     if [ "$key" = 'ctrl-n' ]; then
       local name
       name=$(_tmux_prompt_new_session_name)
-      local _cmux_flags=''
-      typeset -f _tmux_cmux_server_flags > /dev/null 2>&1 && _cmux_flags=$(_tmux_cmux_server_flags)
-      tmux ${_cmux_flags} new -s "$name"
+      typeset -f _tmux_cmux_ensure_server > /dev/null 2>&1 && _tmux_cmux_ensure_server
+      tmux new -s "$name"
       return
     elif [ "$key" = 'ctrl-r' ] && [ -n "$choice" ]; then
       local newname

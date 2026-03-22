@@ -22,15 +22,21 @@ _tmux_cmux_has_cli() {
 }
 
 # ── tmux server startup ───────────────────────────────────────────────────
-# When inside cmux, start tmux server with -D (no-daemon) so that
-# run-shell subprocesses maintain cmux process ancestry for socket auth.
-# Returns the extra flags to pass to `tmux new-session`.
-_tmux_cmux_server_flags() {
+# When inside cmux, start tmux server with -D (no-daemon) as a background
+# job so run-shell subprocesses maintain cmux process ancestry for socket auth.
+# Must be called BEFORE tmux new-session, not inline with flags.
+_tmux_cmux_ensure_server() {
   _tmux_cmux_is_inside || return 0
-  # Only add -D if tmux server is not already running
-  if ! tmux list-sessions &>/dev/null 2>&1; then
-    echo '-D'
-  fi
+  # Skip if server already running
+  tmux list-sessions &>/dev/null 2>&1 && return 0
+  # Start server in foreground mode as background job to keep cmux ancestry
+  tmux -D start-server &
+  # Wait for server to be ready
+  local _tries=0
+  while ! tmux list-sessions &>/dev/null 2>&1 && [ "$_tries" -lt 20 ]; do
+    sleep 0.1
+    _tries=$((_tries + 1))
+  done
 }
 
 # ── Notification ───────────────────────────────────────────────────────────
