@@ -429,18 +429,25 @@ EOF
 }
 
 @test "cc_build_hook_script generates cd and resume for yes mode" {
+  # Test the script generation by overriding tmux to capture the script path
   result=$(zsh -c "
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
-    tmux() { true; }
+    # Override tmux: capture set-hook calls to find the script path
+    _hook_script=''
+    tmux() {
+      if [[ \"\$1\" == 'set-hook' ]]; then
+        _hook_script=\$(echo \"\$@\" | grep -oE \"/tmp/[^ ']+\")
+      fi
+      return 0
+    }
     local panes='sess:1.0|sid-abc|%2Ftmp%2Fproject|My%20Title'
     _tmux_cc_build_hook_script 'test-session' \"\$panes\" 'yes'
-    local f=\$(ls -t /tmp/tmux_cc* 2>/dev/null | head -1)
-    [ -n \"\$f\" ] || exit 1
-    grep -q 'cd --' \"\$f\" && echo 'has_cd'
-    grep -q 'claude --resume sid-abc' \"\$f\" && echo 'has_resume'
-    rm -f \"\$f\"
-  " 2>/dev/null)
+    [ -n \"\$_hook_script\" ] && [ -f \"\$_hook_script\" ] || exit 1
+    grep -q 'cd --' \"\$_hook_script\" && echo 'has_cd'
+    grep -q 'claude --resume sid-abc' \"\$_hook_script\" && echo 'has_resume'
+    rm -f \"\$_hook_script\"
+  ")
   [[ "$result" == *"has_cd"* ]]
   [[ "$result" == *"has_resume"* ]]
 }
@@ -449,17 +456,22 @@ EOF
   result=$(zsh -c "
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
-    tmux() { true; }
+    _hook_script=''
+    tmux() {
+      if [[ \"\$1\" == 'set-hook' ]]; then
+        _hook_script=\$(echo \"\$@\" | grep -oE \"/tmp/[^ ']+\")
+      fi
+      return 0
+    }
     local panes='sess:1.0|sid-abc|%2Ftmp%2Fmyproject|My%20Title'
     _tmux_cc_build_hook_script 'test-session' \"\$panes\" 'no'
-    local f=\$(ls -t /tmp/tmux_cc* 2>/dev/null | head -1)
-    [ -n \"\$f\" ] || exit 1
-    grep -q 'cd -- /tmp/myproject' \"\$f\" && echo 'has_cd'
-    grep -q 'ARCHIVED CLAUDE-CODE' \"\$f\" && echo 'has_info'
-    grep -q 'SID.*sid-abc' \"\$f\" && echo 'has_sid'
-    grep -q 'claude --resume sid-abc' \"\$f\" && echo 'has_run_hint'
-    rm -f \"\$f\"
-  " 2>/dev/null)
+    [ -n \"\$_hook_script\" ] && [ -f \"\$_hook_script\" ] || exit 1
+    grep -q 'cd -- /tmp/myproject' \"\$_hook_script\" && echo 'has_cd'
+    grep -q 'ARCHIVED CLAUDE-CODE' \"\$_hook_script\" && echo 'has_info'
+    grep -q 'SID.*sid-abc' \"\$_hook_script\" && echo 'has_sid'
+    grep -q 'claude --resume sid-abc' \"\$_hook_script\" && echo 'has_run_hint'
+    rm -f \"\$_hook_script\"
+  ")
   [[ "$result" == *"has_cd"* ]]
   [[ "$result" == *"has_info"* ]]
   [[ "$result" == *"has_sid"* ]]
