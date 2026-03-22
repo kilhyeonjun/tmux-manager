@@ -429,28 +429,33 @@ EOF
 }
 
 @test "cc_build_hook_script yes mode contains cd and claude resume in source" {
-  # Verify the function source generates cd + claude --resume for yes mode
   result=$(zsh -c "
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
     typeset -f _tmux_cc_build_hook_script
   ")
-  # yes mode: should have cd and claude --resume
   echo "$result" | grep -q 'cd --'
-  echo "$result" | grep -q 'claude --resume'
+  echo "$result" | grep -q 'claude.*--resume'
 }
 
 @test "cc_build_hook_script no mode contains cd and SID info in source" {
-  # Verify the function source shows SID info for no mode
   result=$(zsh -c "
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
     typeset -f _tmux_cc_build_hook_script
   ")
-  # no mode: should have ARCHIVED CLAUDE-CODE and SID display
   echo "$result" | grep -q 'ARCHIVED CLAUDE-CODE'
   echo "$result" | grep -q 'SID'
-  echo "$result" | grep -q 'claude --resume'
+  echo "$result" | grep -q 'claude.*--resume'
+}
+
+@test "cc_build_hook_script supports dangerous mode flag" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    typeset -f _tmux_cc_build_hook_script
+  ")
+  echo "$result" | grep -q 'dangerously-skip-permissions'
 }
 
 @test "cc_setup_restored_pane always does cd even when cc_dir equals ppath" {
