@@ -218,6 +218,7 @@ _tmux_archive_restore_unlocked() {
       cc_line=$(echo "$cc_section" | awk -F'|' -v w="$p_widx" -v p="$pidx" '$1==w && $2==p {print; exit}')
       local is_cc=false
       [[ "$ptitle" == '✳ '* ]] && is_cc=true
+      [[ "$ptitle" == [⠁⠂⠄⠈⠐⠠⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]' '* ]] && is_cc=true
       [ -n "$cc_line" ] && is_cc=true
 
       if [ "$is_oc" = true ]; then

@@ -7,37 +7,95 @@ load helpers/setup
 # ── Pane title detection ──────────────────────────────────────────────────
 
 @test "CC pane title '✳ Claude Code' is detected" {
-  local ptitle='✳ Claude Code'
-  [[ "$ptitle" == '✳ '* ]]
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_is_pane_title '✳ Claude Code' && echo yes || echo no
+  ")
+  [ "$result" = "yes" ]
 }
 
 @test "CC pane title '✳ Custom Name' is detected" {
-  local ptitle='✳ Custom Name'
-  [[ "$ptitle" == '✳ '* ]]
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_is_pane_title '✳ Custom Name' && echo yes || echo no
+  ")
+  [ "$result" = "yes" ]
+}
+
+@test "CC pane title with braille spinner '⠐ Claude Code' is detected" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_is_pane_title '⠐ Claude Code' && echo yes || echo no
+  ")
+  [ "$result" = "yes" ]
+}
+
+@test "CC pane title with braille spinner '⠂ Claude Code' is detected" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_is_pane_title '⠂ Claude Code' && echo yes || echo no
+  ")
+  [ "$result" = "yes" ]
+}
+
+@test "CC pane title with braille spinner '⠋ My Session' is detected" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_is_pane_title '⠋ My Session' && echo yes || echo no
+  ")
+  [ "$result" = "yes" ]
 }
 
 @test "Non-CC pane title 'zsh' is not detected" {
-  local ptitle='zsh'
-  ! [[ "$ptitle" == '✳ '* ]]
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_is_pane_title 'zsh' && echo yes || echo no
+  ")
+  [ "$result" = "no" ]
 }
 
 @test "OC pane title 'OC | foo' is not detected as CC" {
-  local ptitle='OC | foo'
-  ! [[ "$ptitle" == '✳ '* ]]
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_is_pane_title 'OC | foo' && echo yes || echo no
+  ")
+  [ "$result" = "no" ]
 }
 
 # ── Title extraction ────────────────────────────────────────────────────
 
-@test "CC title extracted from pane title by stripping '✳ ' prefix" {
-  local ptitle='✳ My Session'
-  local cc_name="${ptitle#✳ }"
-  [[ "$cc_name" == "My Session" ]]
+@test "CC title extracted from '✳ My Session'" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_extract_title '✳ My Session'
+  ")
+  [ "$result" = "My Session" ]
 }
 
-@test "CC title '✳ Claude Code' extracts 'Claude Code'" {
-  local ptitle='✳ Claude Code'
-  local cc_name="${ptitle#✳ }"
-  [[ "$cc_name" == "Claude Code" ]]
+@test "CC title extracted from '⠐ Claude Code'" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_extract_title '⠐ Claude Code'
+  ")
+  [ "$result" = "Claude Code" ]
+}
+
+@test "CC title extracted from '⠂ Custom Name'" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_extract_title '⠂ Custom Name'
+  ")
+  [ "$result" = "Custom Name" ]
 }
 
 # ── SID detection from session file ──────────────────────────────────────
@@ -94,6 +152,54 @@ with open('$proj_dir/sessions-index.json') as f:
 " 2>/dev/null)
   [[ "$sid" == "aaa-bbb-ccc" ]]
   rm -rf "$tmpdir"
+}
+
+# ── SID detection from sessions dir scan ──────────────────────────────
+
+@test "cc_detect_sid_from_sessions finds session by cwd" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  mkdir -p "$tmpdir/.claude/sessions"
+  echo '{"pid":111,"sessionId":"sid-aaa","cwd":"/tmp/myproject","startedAt":1000}' > "$tmpdir/.claude/sessions/111.json"
+  echo '{"pid":222,"sessionId":"sid-bbb","cwd":"/tmp/myproject","startedAt":2000}' > "$tmpdir/.claude/sessions/222.json"
+  echo '{"pid":333,"sessionId":"sid-ccc","cwd":"/tmp/other","startedAt":3000}' > "$tmpdir/.claude/sessions/333.json"
+
+  result=$(HOME="$tmpdir" zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_detect_sid_from_sessions '/tmp/myproject'
+  ")
+  rm -rf "$tmpdir"
+  # Should return sid-bbb (most recent startedAt for matching cwd)
+  [ "$result" = "sid-bbb" ]
+}
+
+@test "cc_detect_sid_from_sessions returns empty for non-matching cwd" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  mkdir -p "$tmpdir/.claude/sessions"
+  echo '{"pid":111,"sessionId":"sid-aaa","cwd":"/tmp/other","startedAt":1000}' > "$tmpdir/.claude/sessions/111.json"
+
+  result=$(HOME="$tmpdir" zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_detect_sid_from_sessions '/tmp/myproject' && echo found || echo empty
+  ")
+  rm -rf "$tmpdir"
+  [ "$result" = "empty" ]
+}
+
+@test "cc_detect_sid_from_sessions handles missing sessions dir" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+
+  result=$(HOME="$tmpdir" zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_detect_sid_from_sessions '/tmp/myproject' && echo found || echo empty
+  ")
+  rm -rf "$tmpdir"
+  [ "$result" = "empty" ]
 }
 
 # ── Restore metadata parsing ────────────────────────────────────────────
@@ -264,16 +370,24 @@ EOF
 # ── Preview pane line display ───────────────────────────────────────────
 
 @test "preview pane_line displays CC pane with purple dot" {
-  # preview.sh can't be sourced (it has a case block that runs on source)
-  # Just test the pattern matching logic directly
-  local ptitle='✳ My Session'
-  [[ "$ptitle" == '✳ '* ]]
-  local cc_name="${ptitle#✳ }"
-  [[ "$cc_name" == "My Session" ]]
-
-  # Verify preview.sh contains the CC pattern
+  # Verify preview.sh contains the CC patterns (both ✳ and braille)
   grep -q '✳ ' "$TMUX_MANAGER_DIR/lib/preview.sh"
   grep -q 'claude-code' "$TMUX_MANAGER_DIR/lib/preview.sh"
+  grep -q '⠁⠂⠄⠈⠐⠠⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' "$TMUX_MANAGER_DIR/lib/preview.sh"
+}
+
+@test "preview title extraction works for braille prefix" {
+  # ${ptitle#? } strips one unicode char + space in zsh
+  result=$(zsh -c "
+    local ptitle='⠐ Claude Code'
+    echo \"\${ptitle#? }\"
+  ")
+  [ "$result" = "Claude Code" ]
+}
+
+@test "restore.sh detects braille spinner titles as CC" {
+  # Verify restore.sh contains braille pattern detection
+  grep -q '⠁⠂⠄⠈⠐⠠⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' "$TMUX_MANAGER_DIR/lib/restore.sh"
 }
 
 # ── Group display CC tag ────────────────────────────────────────────────

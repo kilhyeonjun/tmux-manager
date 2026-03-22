@@ -23,8 +23,8 @@ _pane_line() {
       printf "  w%s.%s \033[33m●\033[0m opencode \033[36m\"%s\"\033[0m\n" "$widx" "$pidx" "$oc"
     fi
     printf "        \033[90m%s\033[0m\n" "$ppath"
-  elif [[ "$ptitle" == "✳ "* ]]; then
-    local cc_name="${ptitle#✳ }"
+  elif [[ "$ptitle" == "✳ "* ]] || [[ "$ptitle" == [⠁⠂⠄⠈⠐⠠⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]' '* ]]; then
+    local cc_name="${ptitle#? }"
     if [ -n "$sid" ]; then
       printf "  w%s.%s \033[35m●\033[0m claude-code \033[36m\"%s\"\033[0m \033[90m[%s]\033[0m\n" "$widx" "$pidx" "$cc_name" "$sid"
     else

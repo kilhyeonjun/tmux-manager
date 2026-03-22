@@ -8,6 +8,22 @@ fi
 
 # ── Detection helpers ─────────────────────────────────────────────────────
 
+# Check if a pane title belongs to Claude Code.
+# Claude Code uses ✳ (idle) and Braille dot spinners (⠁⠂⠄⠈⠐⠠⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏) as prefix.
+_tmux_cc_is_pane_title() {
+  local title="$1"
+  [[ "$title" == '✳ '* ]] && return 0
+  [[ "$title" == [⠁⠂⠄⠈⠐⠠⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]' '* ]] && return 0
+  return 1
+}
+
+# Extract the human-readable title by stripping the prefix character + space.
+_tmux_cc_extract_title() {
+  local title="$1"
+  # In zsh, ? matches a single multibyte character
+  echo "${title#? }"
+}
+
 # Detect Claude Code session ID from ~/.claude/sessions/<pid>.json
 _tmux_cc_detect_sid_from_pid() {
   local claude_pid="$1"
@@ -45,6 +61,31 @@ with open('$index_file') as f:
             best = e
     if best and best.get('sessionId'):
         print(best['sessionId'])
+" 2>/dev/null || return 1
+}
+
+# Detect session ID by scanning ~/.claude/sessions/*.json matching cwd
+_tmux_cc_detect_sid_from_sessions() {
+  local pane_cwd="$1"
+  [ -z "$pane_cwd" ] && return 1
+  local sessions_dir="$HOME/.claude/sessions"
+  [ -d "$sessions_dir" ] || return 1
+
+  python3 -c "
+import json, glob, os
+cwd = '''${pane_cwd}'''
+best_sid, best_time = '', 0
+for f in glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'sessions', '*.json')):
+    try:
+        with open(f) as fh:
+            d = json.load(fh)
+            if d.get('cwd') == cwd:
+                t = d.get('startedAt', 0)
+                if t > best_time:
+                    best_time = t
+                    best_sid = d.get('sessionId', '')
+    except: pass
+if best_sid: print(best_sid)
 " 2>/dev/null || return 1
 }
 
@@ -125,7 +166,7 @@ _tmux_cc_capture_session() {
     fi
 
     # Check pane title
-    [[ "$_title" == '✳ '* ]] && is_cc_running=true
+    _tmux_cc_is_pane_title "$_title" && is_cc_running=true
 
     if [ "$is_cc_running" = true ]; then
       local cc_sid=''
@@ -140,9 +181,14 @@ _tmux_cc_capture_session() {
         cc_sid=$(_tmux_cc_detect_sid_from_index "$_ppath" 2>/dev/null) || true
       fi
 
+      # Method 3: scan ~/.claude/sessions/*.json by cwd
+      if [ -z "$cc_sid" ]; then
+        cc_sid=$(_tmux_cc_detect_sid_from_sessions "$_ppath" 2>/dev/null) || true
+      fi
+
       local cc_title='(detected)'
-      if [[ "$_title" == '✳ '* ]]; then
-        cc_title="${_title#✳ }"
+      if _tmux_cc_is_pane_title "$_title"; then
+        cc_title=$(_tmux_cc_extract_title "$_title")
       fi
       # If title is just "Claude Code", try sessions-index for a better title
       if [ "$cc_title" = 'Claude Code' ] || [ "$cc_title" = '(detected)' ]; then
@@ -224,7 +270,12 @@ _tmux_cc_setup_restored_pane() {
   [ -z "$pane_target" ] && pane_target="${target}.${pidx}"
   local fmt="${_TMUX_RESTORE_ARCHIVE_FMT:-1}"
 
-  local cc_title="${ptitle#✳ }"
+  local cc_title
+  if _tmux_cc_is_pane_title "$ptitle"; then
+    cc_title=$(_tmux_cc_extract_title "$ptitle")
+  else
+    cc_title="$ptitle"
+  fi
   if [ -z "$cc_title" ] || [ "$cc_title" = "$ptitle" ]; then
     cc_title=$(echo "$cc_line" | cut -d'|' -f4)
   fi
