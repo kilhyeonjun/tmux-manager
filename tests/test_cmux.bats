@@ -240,40 +240,7 @@ s.listen(1)
   [[ "$result" == *"cmux=1"* ]]
 }
 
-@test "cmux_notify passes urgency value correctly to cmux CLI" {
-  # Stub cmux to capture the arguments it receives
-  local stub_dir
-  stub_dir=$(mktemp -d)
-  cat > "$stub_dir/cmux" << 'STUB'
-#!/bin/sh
-# Capture all arguments to a log file
-echo "$@" >> "$CMUX_STUB_LOG"
-STUB
-  chmod +x "$stub_dir/cmux"
-
-  local log_file
-  log_file=$(mktemp)
-
-  result=$(zsh -c "
-    export PATH='$stub_dir:\$PATH'
-    export CMUX_STUB_LOG='$log_file'
-    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
-    source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
-    _tmux_cmux_notify 'Test Title' 'Test Body' low
-  ")
-
-  local logged
-  logged=$(cat "$log_file")
-  rm -f "$log_file"
-  rm -rf "$stub_dir"
-
-  # Should contain: notify --title Test Title --body Test Body --urgency low
-  [[ "$logged" == *"--urgency low"* ]]
-  # Must NOT contain double --urgency (the old bug)
-  ! [[ "$logged" == *"--urgency --urgency"* ]]
-}
-
-@test "cmux_notify defaults urgency to normal when not specified" {
+@test "cmux_notify sends title and body without urgency flag" {
   local stub_dir
   stub_dir=$(mktemp -d)
   cat > "$stub_dir/cmux" << 'STUB'
@@ -290,7 +257,7 @@ STUB
     export CMUX_STUB_LOG='$log_file'
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
-    _tmux_cmux_notify 'Title' 'Body'
+    _tmux_cmux_notify 'Test Title' 'Test Body'
   ")
 
   local logged
@@ -298,10 +265,12 @@ STUB
   rm -f "$log_file"
   rm -rf "$stub_dir"
 
-  [[ "$logged" == *"--urgency normal"* ]]
+  [[ "$logged" == *"--title Test Title"* ]]
+  [[ "$logged" == *"--body Test Body"* ]]
+  ! [[ "$logged" == *"--urgency"* ]]
 }
 
-@test "cmux_notify_save auto mode passes low urgency" {
+@test "cmux_notify_save auto mode sends notification" {
   local stub_dir
   stub_dir=$(mktemp -d)
   cat > "$stub_dir/cmux" << 'STUB'
@@ -327,11 +296,12 @@ STUB
   rm -f "$log_file"
   rm -rf "$stub_dir"
 
-  [[ "$logged" == *"--urgency low"* ]]
-  ! [[ "$logged" == *"--urgency --urgency"* ]]
+  [[ "$logged" == *"--title Auto Archive"* ]]
+  [[ "$logged" == *"--body my-session: saved"* ]]
+  ! [[ "$logged" == *"--urgency"* ]]
 }
 
-@test "cmux_notify_save manual mode passes normal urgency" {
+@test "cmux_notify_save manual mode sends notification" {
   local stub_dir
   stub_dir=$(mktemp -d)
   cat > "$stub_dir/cmux" << 'STUB'
@@ -357,10 +327,11 @@ STUB
   rm -f "$log_file"
   rm -rf "$stub_dir"
 
-  [[ "$logged" == *"--urgency normal"* ]]
+  [[ "$logged" == *"--title Archive Saved"* ]]
+  ! [[ "$logged" == *"--urgency"* ]]
 }
 
-@test "cmux_notify_restore_fail passes critical urgency" {
+@test "cmux_notify_restore_fail sends notification" {
   local stub_dir
   stub_dir=$(mktemp -d)
   cat > "$stub_dir/cmux" << 'STUB'
@@ -386,11 +357,12 @@ STUB
   rm -f "$log_file"
   rm -rf "$stub_dir"
 
-  [[ "$logged" == *"--urgency critical"* ]]
-  ! [[ "$logged" == *"--urgency --urgency"* ]]
+  [[ "$logged" == *"--title Restore Failed"* ]]
+  [[ "$logged" == *"--body session creation failed"* ]]
+  ! [[ "$logged" == *"--urgency"* ]]
 }
 
-@test "cmux_notify_restore passes normal urgency" {
+@test "cmux_notify_restore sends notification" {
   local stub_dir
   stub_dir=$(mktemp -d)
   cat > "$stub_dir/cmux" << 'STUB'
@@ -416,7 +388,9 @@ STUB
   rm -f "$log_file"
   rm -rf "$stub_dir"
 
-  [[ "$logged" == *"--urgency normal"* ]]
+  [[ "$logged" == *"--title Session Restored"* ]]
+  [[ "$logged" == *"--body my-session"* ]]
+  ! [[ "$logged" == *"--urgency"* ]]
 }
 
 @test "init.sh loads cmux plugin from plugins dir" {

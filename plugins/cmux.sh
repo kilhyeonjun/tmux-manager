@@ -23,11 +23,11 @@ _tmux_cmux_has_cli() {
 
 # ── Notification ───────────────────────────────────────────────────────────
 # Send a notification via cmux notify CLI.
-# Usage: _tmux_cmux_notify <title> <body> [--urgency <low|normal|critical>]
+# Usage: _tmux_cmux_notify <title> <body>
 _tmux_cmux_notify() {
   _tmux_cmux_has_cli || return 0
-  local title="$1" body="$2" urgency="${3:-normal}"
-  cmux notify --title "$title" --body "$body" --urgency "$urgency" 2>/dev/null || true
+  local title="$1" body="$2"
+  cmux notify --title "$title" --body "$body" 2>/dev/null || true
 }
 
 # Called after successful archive save
@@ -35,7 +35,7 @@ _tmux_cmux_notify_save() {
   local session="$1" file="$2" auto_mode="$3"
   _tmux_cmux_is_inside || return 0
   if [ "$auto_mode" = 'auto' ]; then
-    _tmux_cmux_notify "Auto Archive" "${session}: saved" low
+    _tmux_cmux_notify "Auto Archive" "${session}: saved"
   else
     _tmux_cmux_notify "Archive Saved" "${session}: $(basename "$file")"
   fi
@@ -52,7 +52,7 @@ _tmux_cmux_notify_restore() {
 _tmux_cmux_notify_restore_fail() {
   local reason="$1"
   _tmux_cmux_is_inside || return 0
-  _tmux_cmux_notify "Restore Failed" "$reason" critical
+  _tmux_cmux_notify "Restore Failed" "$reason"
 }
 
 # ── Workspace rename ──────────────────────────────────────────────────
@@ -92,14 +92,14 @@ _tmux_cmux_capture_session() {
 
   # Query cmux for workspace info via socket API
   local workspace_id='' workspace_label=''
-  workspace_id=$(cmux workspace current --format json 2>/dev/null | python3 -c '
+  workspace_id=$(cmux current-workspace --format json 2>/dev/null | python3 -c '
 import json, sys
 try:
   d = json.load(sys.stdin)
   print(d.get("id", ""))
 except: pass' 2>/dev/null) || true
 
-  workspace_label=$(cmux workspace current --format json 2>/dev/null | python3 -c '
+  workspace_label=$(cmux current-workspace --format json 2>/dev/null | python3 -c '
 import json, sys
 try:
   d = json.load(sys.stdin)
@@ -108,7 +108,7 @@ except: pass' 2>/dev/null) || true
 
   # Collect listening ports for this session's panes
   local ports=''
-  ports=$(cmux workspace current --format json 2>/dev/null | python3 -c '
+  ports=$(cmux current-workspace --format json 2>/dev/null | python3 -c '
 import json, sys
 try:
   d = json.load(sys.stdin)
