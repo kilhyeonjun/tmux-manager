@@ -296,7 +296,7 @@ _tmux_cc_setup_restored_pane() {
   [ -z "$cc_dir" ] && cc_dir="$ppath"
 
   if [ -n "$cc_sid" ]; then
-    if [ -n "$cc_dir" ] && [ "$cc_dir" != "$ppath" ]; then
+    if [ -n "$cc_dir" ]; then
       local qdir
       qdir=$(printf '%q' "$cc_dir")
       tmux send-keys -t "$pane_target" "cd -- $qdir" Enter
@@ -333,78 +333,89 @@ _tmux_cc_setup_restored_pane() {
 }
 
 # ── CC restart prompt ───────────────────────────────────────────────────────
+# Global batch choice: a=all yes, n=all no, i=individual, empty=first time
+_TMUX_CC_RESTART_BATCH=''
+
+# Build attach hook script for a session's CC panes
+_tmux_cc_build_hook_script() {
+  local session_name="$1" cc_panes="$2" do_resume="$3"
+  local script
+  script=$(mktemp -t tmux_cc)
+  echo '#!/bin/zsh' > "$script"
+  echo 'sleep 0.8' >> "$script"
+  echo -e "$cc_panes" | while IFS='|' read -r tgt sid dir title; do
+    [ -z "$tgt" ] && continue
+    sid=$(_tmux_af_unescape "$sid")
+    dir=$(_tmux_af_unescape "$dir")
+    [ -z "$dir" ] && dir='/'
+    local qdir
+    qdir=$(printf '%q' "$dir")
+    # Always cd to the project directory
+    echo "tmux send-keys -t '$tgt' \"cd -- $qdir\" Enter" >> "$script"
+    echo "sleep 0.3" >> "$script"
+    if [ "$do_resume" = 'yes' ]; then
+      # Auto-start claude
+      if [ -n "$sid" ]; then
+        echo "tmux send-keys -t '$tgt' 'claude --resume $sid' Enter" >> "$script"
+      else
+        echo "tmux send-keys -t '$tgt' 'claude' Enter" >> "$script"
+      fi
+    else
+      # Show SID info for manual resume
+      title=$(_tmux_af_unescape "$title")
+      local safe_title="${title//\'/  }"
+      echo "tmux send-keys -t '$tgt' \" echo ''\" Enter" >> "$script"
+      echo "tmux send-keys -t '$tgt' \" echo '  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'\" Enter" >> "$script"
+      echo "tmux send-keys -t '$tgt' \" echo '  [ARCHIVED CLAUDE-CODE]'\" Enter" >> "$script"
+      echo "tmux send-keys -t '$tgt' \" echo '  TITLE : ${safe_title}'\" Enter" >> "$script"
+      if [ -n "$sid" ]; then
+        echo "tmux send-keys -t '$tgt' \" echo '  SID   : ${sid}'\" Enter" >> "$script"
+        echo "tmux send-keys -t '$tgt' \" echo '  RUN   : claude --resume ${sid}'\" Enter" >> "$script"
+      else
+        echo "tmux send-keys -t '$tgt' \" echo '  RUN   : claude'\" Enter" >> "$script"
+      fi
+      echo "tmux send-keys -t '$tgt' \" echo '  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'\" Enter" >> "$script"
+      echo "tmux send-keys -t '$tgt' \" echo ''\" Enter" >> "$script"
+    fi
+  done
+  echo "rm -f '$script'" >> "$script"
+  echo "tmux set-hook -u -t '$session_name' client-attached" >> "$script"
+  echo "tmux set-hook -u -t '$session_name' client-session-changed" >> "$script"
+  chmod +x "$script"
+  tmux set-hook -t "$session_name" client-attached "run-shell '$script'"
+  tmux set-hook -t "$session_name" client-session-changed "run-shell '$script'"
+}
+
 _tmux_cc_prompt_restart() {
   local session_name="$1" cc_panes="$2"
   [ -z "$cc_panes" ] && return 0
   [[ -t 0 ]] || return 0
 
-  echo -n "\033[35mclaude-code 재실행할까요? (y/N): \033[0m"
-  local cc_confirm
-  read -r cc_confirm
+  local choice="$_TMUX_CC_RESTART_BATCH"
 
-  if [ "$cc_confirm" = 'y' ] || [ "$cc_confirm" = 'Y' ]; then
-    local cc_script
-    cc_script=$(mktemp -t tmux_cc)
-    echo '#!/bin/zsh' > "$cc_script"
-    echo 'sleep 0.8' >> "$cc_script"
-    echo -e "$cc_panes" | while IFS='|' read -r tgt sid dir title; do
-      [ -z "$tgt" ] && continue
-      sid=$(_tmux_af_unescape "$sid")
-      dir=$(_tmux_af_unescape "$dir")
-      [ -z "$dir" ] && dir='/'
-      local qdir
-      qdir=$(printf '%q' "$dir")
-      if [ -n "$sid" ]; then
-        echo "tmux send-keys -t '$tgt' \"cd -- $qdir\" Enter" >> "$cc_script"
-        echo "sleep 0.3" >> "$cc_script"
-        echo "tmux send-keys -t '$tgt' 'claude --resume $sid' Enter" >> "$cc_script"
-      else
-        echo "tmux send-keys -t '$tgt' \"cd -- $qdir\" Enter" >> "$cc_script"
-        echo "sleep 0.3" >> "$cc_script"
-        echo "tmux send-keys -t '$tgt' 'claude' Enter" >> "$cc_script"
-      fi
-    done
-    echo "rm -f '$cc_script'" >> "$cc_script"
-    echo "tmux set-hook -u -t '$session_name' client-attached" >> "$cc_script"
-    echo "tmux set-hook -u -t '$session_name' client-session-changed" >> "$cc_script"
-    chmod +x "$cc_script"
-    tmux set-hook -t "$session_name" client-attached "run-shell '$cc_script'"
-    tmux set-hook -t "$session_name" client-session-changed "run-shell '$cc_script'"
-    echo "\033[32m✓ claude-code: attach 후 자동 실행 예약\033[0m"
+  # First time: show batch prompt
+  if [ -z "$choice" ]; then
+    echo -n "\033[35mclaude-code 재실행: \033[0m모두(a) / 개별(i) / 건너뛰기(n): "
+    read -r choice
+    case "$choice" in
+      a|A) _TMUX_CC_RESTART_BATCH='a'; choice='a' ;;
+      i|I) _TMUX_CC_RESTART_BATCH='i'; choice='y' ;;  # first one = yes for individual
+      *)   _TMUX_CC_RESTART_BATCH='n'; choice='n' ;;
+    esac
+  fi
+
+  # Individual mode: ask per session
+  if [ "$choice" = 'i' ]; then
+    echo -n "\033[35m  ${session_name} 재실행? (y/N): \033[0m"
+    read -r choice
+    [[ "$choice" = 'y' || "$choice" = 'Y' ]] && choice='y' || choice='n'
+  fi
+
+  if [ "$choice" = 'a' ] || [ "$choice" = 'y' ]; then
+    _tmux_cc_build_hook_script "$session_name" "$cc_panes" 'yes'
+    echo "\033[32m  ✓ ${session_name}: attach 후 자동 실행\033[0m"
   else
-    local info_script
-    info_script=$(mktemp -t tmux_cc_info)
-    echo '#!/bin/zsh' > "$info_script"
-    echo 'sleep 0.8' >> "$info_script"
-    echo -e "$cc_panes" | while IFS='|' read -r tgt sid dir title; do
-      [ -z "$tgt" ] && continue
-      sid=$(_tmux_af_unescape "$sid")
-      dir=$(_tmux_af_unescape "$dir")
-      title=$(_tmux_af_unescape "$title")
-      [ -z "$dir" ] && dir='/'
-      local safe_title="${title//\'/  }"
-      local safe_dir="${dir//\'/  }"
-      local qdir
-      qdir=$(printf '%q' "$dir")
-      echo "tmux send-keys -t '$tgt' \"cd -- $qdir\" Enter" >> "$info_script"
-      echo "sleep 0.3" >> "$info_script"
-      echo "tmux send-keys -t '$tgt' \"echo '[ARCHIVED CLAUDE-CODE]'\" Enter" >> "$info_script"
-      echo "tmux send-keys -t '$tgt' \"echo 'TITLE: ${safe_title}'\" Enter" >> "$info_script"
-      if [ -n "$sid" ]; then
-        echo "tmux send-keys -t '$tgt' \"echo 'SID: ${sid}'\" Enter" >> "$info_script"
-        echo "tmux send-keys -t '$tgt' \"echo 'DIR: ${safe_dir}'\" Enter" >> "$info_script"
-        echo "tmux send-keys -t '$tgt' \"echo 'RUN: claude --resume ${sid}'\" Enter" >> "$info_script"
-      else
-        echo "tmux send-keys -t '$tgt' \"echo 'DIR: ${safe_dir}'\" Enter" >> "$info_script"
-        echo "tmux send-keys -t '$tgt' \"echo 'RUN: claude'\" Enter" >> "$info_script"
-      fi
-    done
-    echo "rm -f '$info_script'" >> "$info_script"
-    echo "tmux set-hook -u -t '$session_name' client-attached" >> "$info_script"
-    echo "tmux set-hook -u -t '$session_name' client-session-changed" >> "$info_script"
-    chmod +x "$info_script"
-    tmux set-hook -t "$session_name" client-attached "run-shell '$info_script'"
-    tmux set-hook -t "$session_name" client-session-changed "run-shell '$info_script'"
-    echo "\033[90mℹ attach 후 Claude Code 복원 정보 표시\033[0m"
+    _tmux_cc_build_hook_script "$session_name" "$cc_panes" 'no'
+    echo "\033[90m  ℹ ${session_name}: attach 후 SID 정보 표시 + 경로 이동\033[0m"
   fi
 }
