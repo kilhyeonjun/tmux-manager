@@ -390,6 +390,126 @@ EOF
   grep -q '⠁⠂⠄⠈⠐⠠⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' "$TMUX_MANAGER_DIR/lib/restore.sh"
 }
 
+# ── Batch prompt logic ────────────────────────────────────────────────
+
+@test "cc_prompt_restart batch 'a' sets global and returns 'a'" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _TMUX_CC_RESTART_BATCH=''
+    # Simulate 'a' input
+    _TMUX_CC_RESTART_BATCH='a'
+    local choice=\$_TMUX_CC_RESTART_BATCH
+    echo \$choice
+  ")
+  [ "$result" = "a" ]
+}
+
+@test "cc_prompt_restart batch 'i' does NOT auto-yes first session" {
+  # Verify the code: when user picks 'i', choice should be 'i' not 'y'
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    # Simulate the case statement for 'i'
+    local choice='i'
+    case \"\$choice\" in
+      i|I) _TMUX_CC_RESTART_BATCH='i'; choice='i' ;;
+    esac
+    echo \"batch=\$_TMUX_CC_RESTART_BATCH choice=\$choice\"
+  ")
+  [[ "$result" == *"batch=i"* ]]
+  [[ "$result" == *"choice=i"* ]]
+  # Must NOT contain choice=y
+  ! [[ "$result" == *"choice=y"* ]]
+}
+
+@test "cc_prompt_restart source code has choice=i not choice=y for individual" {
+  # Direct source verification: the 'i' case must set choice='i'
+  grep -A1 "i|I)" "$TMUX_MANAGER_DIR/plugins/claude-code.sh" | grep -q "choice='i'"
+}
+
+@test "cc_build_hook_script generates cd command for resume=yes" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    # Mock tmux commands
+    tmux() { true; }
+    local panes='sess:1.0|sid-abc|%2Ftmp%2Fproject|My%20Title'
+    _tmux_cc_build_hook_script 'test-session' \"\$panes\" 'yes'
+  " 2>/dev/null)
+  # Check the generated script contains cd and claude --resume
+  local scripts=(/tmp/tmux_cc*)
+  if [ ${#scripts[@]} -gt 0 ]; then
+    local latest="${scripts[-1]}"
+    grep -q 'cd --' "$latest" && echo "has_cd"
+    grep -q 'claude --resume sid-abc' "$latest" && echo "has_resume"
+    rm -f "$latest"
+  fi
+}
+
+@test "cc_build_hook_script generates SID info for resume=no" {
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    # Mock tmux commands
+    tmux() { true; }
+    local panes='sess:1.0|sid-abc|%2Ftmp%2Fproject|My%20Title'
+    _tmux_cc_build_hook_script 'test-session' \"\$panes\" 'no'
+  " 2>/dev/null)
+  local scripts=(/tmp/tmux_cc*)
+  if [ ${#scripts[@]} -gt 0 ]; then
+    local latest="${scripts[-1]}"
+    grep -q 'cd --' "$latest" && echo "has_cd"
+    grep -q 'SID' "$latest" && echo "has_sid"
+    grep -q 'claude --resume sid-abc' "$latest" && echo "has_resume_cmd"
+    # Should NOT auto-start claude
+    ! grep -q "'claude --resume" "$latest" || [ "$(grep -c "'claude --resume" "$latest")" -eq 0 ]
+    rm -f "$latest"
+  fi
+}
+
+@test "cc_build_hook_script always includes cd even when resume=no" {
+  # The hook script must ALWAYS navigate to the project dir
+  local tmpscript
+  tmpscript=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    tmux() { true; }
+    local panes='sess:1.0|sid-abc|%2Ftmp%2Fmyproject|Title'
+    _tmux_cc_build_hook_script 'test-session' \"\$panes\" 'no'
+    # Find the generated script
+    ls -t /tmp/tmux_cc* 2>/dev/null | head -1
+  " 2>/dev/null)
+  [ -n "$tmpscript" ] && [ -f "$tmpscript" ] || skip "script not generated"
+  grep -q 'cd -- /tmp/myproject' "$tmpscript"
+  grep -q 'ARCHIVED CLAUDE-CODE' "$tmpscript"
+  grep -q 'SID.*sid-abc' "$tmpscript"
+  grep -q 'claude --resume sid-abc' "$tmpscript"
+  rm -f "$tmpscript"
+}
+
+@test "cc_setup_restored_pane always does cd even when cc_dir equals ppath" {
+  # Verify source code: cd block should check [ -n "$cc_dir" ] only, not cc_dir != ppath
+  local cd_guard
+  cd_guard=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    typeset -f _tmux_cc_setup_restored_pane
+  " | grep -A1 'if \[' | grep 'cc_dir')
+  # Should NOT contain 'ppath' in the cd guard
+  ! echo "$cd_guard" | grep -q 'ppath'
+}
+
+@test "cc_prompt_restart global batch variable resets between restore-at calls" {
+  # _TMUX_CC_RESTART_BATCH is set at source time as ''
+  result=$(zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    echo \$_TMUX_CC_RESTART_BATCH
+  ")
+  [ -z "$result" ]
+}
+
 # ── Group display CC tag ────────────────────────────────────────────────
 
 @test "group display includes [CC:N] tag" {

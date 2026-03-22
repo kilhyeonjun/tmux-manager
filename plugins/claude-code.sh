@@ -399,12 +399,12 @@ _tmux_cc_prompt_restart() {
     read -r choice
     case "$choice" in
       a|A) _TMUX_CC_RESTART_BATCH='a'; choice='a' ;;
-      i|I) _TMUX_CC_RESTART_BATCH='i'; choice='y' ;;  # first one = yes for individual
+      i|I) _TMUX_CC_RESTART_BATCH='i'; choice='i' ;;
       *)   _TMUX_CC_RESTART_BATCH='n'; choice='n' ;;
     esac
   fi
 
-  # Individual mode: ask per session
+  # Individual mode: ask per session (including first)
   if [ "$choice" = 'i' ]; then
     echo -n "\033[35m  ${session_name} 재실행? (y/N): \033[0m"
     read -r choice
