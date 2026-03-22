@@ -46,6 +46,7 @@ jobs:
             tests/test_metrics.bats \
             tests/test_opencode.bats \
             tests/test_claude_code.bats \
+            tests/test_cmux.bats \
             tests/test_preview.bats \
             tests/test_quickwins.bats \
             tests/test_spacing_regression.bats \

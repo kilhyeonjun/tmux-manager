@@ -9,10 +9,10 @@ fi
 # ── Detection ──────────────────────────────────────────────────────────────
 # Check if running inside cmux terminal
 _tmux_cmux_is_inside() {
-  # cmux sets TERM_PROGRAM=cmux
-  [[ "$TERM_PROGRAM" == 'cmux' ]] && return 0
-  # fallback: check for cmux socket
-  [[ -S "${CMUX_SOCKET:-}" ]] && return 0
+  # cmux sets CMUX_BUNDLE_ID when running inside cmux terminal
+  [[ -n "${CMUX_BUNDLE_ID:-}" ]] && return 0
+  # fallback: check for cmux socket path
+  [[ -S "${CMUX_SOCKET_PATH:-}" ]] && return 0
   return 1
 }
 
