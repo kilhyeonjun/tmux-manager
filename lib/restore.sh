@@ -93,7 +93,6 @@ _tmux_archive_restore_unlocked() {
     [ -n "$_lh" ] && [ "$_lh" -gt "$_restore_h" ] 2>/dev/null && _restore_h="$_lh"
   done <<< "$windows_sorted"
 
-  typeset -f _tmux_cmux_ensure_server > /dev/null 2>&1 && _tmux_cmux_ensure_server
   tmux new-session -d -s "$session_name" -x "$_restore_w" -y "$_restore_h" || {
     echo "\033[31m복원 실패: 세션 생성 실패\033[0m"
     if typeset -f _tmux_cmux_notify_restore_fail > /dev/null 2>&1; then

@@ -335,14 +335,17 @@ _tmux_cc_setup_restored_pane() {
 # ── CC restart prompt ───────────────────────────────────────────────────────
 # Global batch choice: a=all yes, n=all no, i=individual, empty=first time
 _TMUX_CC_RESTART_BATCH=''
+_TMUX_CC_DANGEROUS_MODE=''
 
 # Build attach hook script for a session's CC panes
 _tmux_cc_build_hook_script() {
-  local session_name="$1" cc_panes="$2" do_resume="$3"
+  local session_name="$1" cc_panes="$2" do_resume="$3" dangerous="$4"
   local script
   script=$(mktemp -t tmux_cc)
   echo '#!/bin/zsh' > "$script"
   echo 'sleep 0.8' >> "$script"
+  local claude_flags=''
+  [ "$dangerous" = 'yes' ] && claude_flags=' --dangerously-skip-permissions'
   echo -e "$cc_panes" | while IFS='|' read -r tgt sid dir title; do
     [ -z "$tgt" ] && continue
     sid=$(_tmux_af_unescape "$sid")
@@ -354,14 +357,12 @@ _tmux_cc_build_hook_script() {
     echo "tmux send-keys -t '$tgt' \"cd -- $qdir\" Enter" >> "$script"
     echo "sleep 0.3" >> "$script"
     if [ "$do_resume" = 'yes' ]; then
-      # Auto-start claude
       if [ -n "$sid" ]; then
-        echo "tmux send-keys -t '$tgt' 'claude --resume $sid' Enter" >> "$script"
+        echo "tmux send-keys -t '$tgt' 'claude${claude_flags} --resume $sid' Enter" >> "$script"
       else
-        echo "tmux send-keys -t '$tgt' 'claude' Enter" >> "$script"
+        echo "tmux send-keys -t '$tgt' 'claude${claude_flags}' Enter" >> "$script"
       fi
     else
-      # Show SID info for manual resume
       title=$(_tmux_af_unescape "$title")
       local safe_title="${title//\'/  }"
       echo "tmux send-keys -t '$tgt' \" echo ''\" Enter" >> "$script"
@@ -370,9 +371,9 @@ _tmux_cc_build_hook_script() {
       echo "tmux send-keys -t '$tgt' \" echo '  TITLE : ${safe_title}'\" Enter" >> "$script"
       if [ -n "$sid" ]; then
         echo "tmux send-keys -t '$tgt' \" echo '  SID   : ${sid}'\" Enter" >> "$script"
-        echo "tmux send-keys -t '$tgt' \" echo '  RUN   : claude --resume ${sid}'\" Enter" >> "$script"
+        echo "tmux send-keys -t '$tgt' \" echo '  RUN   : claude${claude_flags} --resume ${sid}'\" Enter" >> "$script"
       else
-        echo "tmux send-keys -t '$tgt' \" echo '  RUN   : claude'\" Enter" >> "$script"
+        echo "tmux send-keys -t '$tgt' \" echo '  RUN   : claude${claude_flags}'\" Enter" >> "$script"
       fi
       echo "tmux send-keys -t '$tgt' \" echo '  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'\" Enter" >> "$script"
       echo "tmux send-keys -t '$tgt' \" echo ''\" Enter" >> "$script"
@@ -395,6 +396,7 @@ _tmux_cc_prompt_restart() {
 
   # First time: show batch prompt
   if [ -z "$choice" ]; then
+    echo ''
     echo -n "\033[35mclaude-code 재실행: \033[0m모두(a) / 개별(i) / 건너뛰기(n): "
     read -r choice
     case "$choice" in
@@ -402,6 +404,13 @@ _tmux_cc_prompt_restart() {
       i|I) _TMUX_CC_RESTART_BATCH='i'; choice='i' ;;
       *)   _TMUX_CC_RESTART_BATCH='n'; choice='n' ;;
     esac
+    # Ask dangerous mode for 'a' or 'i'
+    if [ "$choice" = 'a' ] || [ "$choice" = 'i' ]; then
+      echo -n "\033[33m--dangerously-skip-permissions 사용? (y/N): \033[0m"
+      local dmode
+      read -r dmode
+      [[ "$dmode" = 'y' || "$dmode" = 'Y' ]] && _TMUX_CC_DANGEROUS_MODE='yes' || _TMUX_CC_DANGEROUS_MODE='no'
+    fi
   fi
 
   # Individual mode: ask per session (including first)
@@ -412,10 +421,10 @@ _tmux_cc_prompt_restart() {
   fi
 
   if [ "$choice" = 'a' ] || [ "$choice" = 'y' ]; then
-    _tmux_cc_build_hook_script "$session_name" "$cc_panes" 'yes'
+    _tmux_cc_build_hook_script "$session_name" "$cc_panes" 'yes' "$_TMUX_CC_DANGEROUS_MODE"
     echo "\033[32m  ✓ ${session_name}: attach 후 자동 실행\033[0m"
   else
-    _tmux_cc_build_hook_script "$session_name" "$cc_panes" 'no'
+    _tmux_cc_build_hook_script "$session_name" "$cc_panes" 'no' "$_TMUX_CC_DANGEROUS_MODE"
     echo "\033[90m  ℹ ${session_name}: attach 후 SID 정보 표시 + 경로 이동\033[0m"
   fi
 }

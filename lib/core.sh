@@ -799,6 +799,9 @@ tmux-archive() {
         printf "  \033[36m%s\033[0m\n" "$sname"
       done
       echo ''
+      # Reset CC batch prompt for this restore-at session
+      _TMUX_CC_RESTART_BATCH=''
+      _TMUX_CC_DANGEROUS_MODE=''
       local restored=0 skipped=0 failed=0
       for f in "${matches[@]}"; do
         local sname=$(_tmux_af_header_get "$f" SESSION_NAME)
@@ -1151,7 +1154,6 @@ tmux-manager() {
         1)
           local name
           name=$(_tmux_prompt_new_session_name)
-          typeset -f _tmux_cmux_ensure_server > /dev/null 2>&1 && _tmux_cmux_ensure_server
           tmux new -s "$name"
           ;;
         2) _tmux_archive_manager ;;
