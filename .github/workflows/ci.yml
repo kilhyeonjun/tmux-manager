@@ -25,6 +25,7 @@ jobs:
             lib/status.sh \
             lib/preview.sh \
             plugins/opencode.sh \
+            plugins/claude-code.sh \
             hooks/on-session-created.sh \
             hooks/tmux-hooks.conf \
             cron/autoarchive.sh \
@@ -44,6 +45,7 @@ jobs:
             tests/test_core.bats \
             tests/test_metrics.bats \
             tests/test_opencode.bats \
+            tests/test_claude_code.bats \
             tests/test_preview.bats \
             tests/test_quickwins.bats \
             tests/test_spacing_regression.bats \

@@ -23,6 +23,14 @@ _pane_line() {
       printf "  w%s.%s \033[33m●\033[0m opencode \033[36m\"%s\"\033[0m\n" "$widx" "$pidx" "$oc"
     fi
     printf "        \033[90m%s\033[0m\n" "$ppath"
+  elif [[ "$ptitle" == "✳ "* ]]; then
+    local cc_name="${ptitle#✳ }"
+    if [ -n "$sid" ]; then
+      printf "  w%s.%s \033[35m●\033[0m claude-code \033[36m\"%s\"\033[0m \033[90m[%s]\033[0m\n" "$widx" "$pidx" "$cc_name" "$sid"
+    else
+      printf "  w%s.%s \033[35m●\033[0m claude-code \033[36m\"%s\"\033[0m\n" "$widx" "$pidx" "$cc_name"
+    fi
+    printf "        \033[90m%s\033[0m\n" "$ppath"
   elif [ -n "$pcmd" ] && [ "$pcmd" != "zsh" ] && [ "$pcmd" != "bash" ]; then
     printf "  w%s.%s \033[33m●\033[0m %s\n" "$widx" "$pidx" "$pcmd"
     printf "        \033[90m%s\033[0m\n" "$ppath"
@@ -124,16 +132,20 @@ case "$mode" in
     printf "\033[90m%s  %sw %sp\033[0m\n" "$date" "$wins" "$panes"
     _divider
 
-    oc_lines=$(_tmux_af_section_lines "$file" '---OPENCODE---' '---CMUX---')
+    oc_lines=$(_tmux_af_section_lines "$file" '---OPENCODE---' '---CLAUDE-CODE---')
+    local cc_lines
+    cc_lines=$(_tmux_af_section_lines "$file" '---CLAUDE-CODE---' '---CMUX---')
     echo "$panes_raw" | while IFS='|' read -r sn widx pidx ppath pcmd ptitle; do
       [ -z "$sn" ] && continue
       sn=$(_tmux_af_decode_field_if_needed "$fmt" "$sn")
       ppath=$(_tmux_af_decode_field_if_needed "$fmt" "$ppath")
       pcmd=$(_tmux_af_decode_field_if_needed "$fmt" "$pcmd")
       ptitle=$(_tmux_af_decode_field_if_needed "$fmt" "$ptitle")
-      oc_sid=$(echo "$oc_lines" | awk -F'|' -v w="$widx" -v p="$pidx" '$1==w && $2==p {print $3; exit}')
-      oc_sid=$(_tmux_af_decode_field_if_needed "$fmt" "$oc_sid")
-      _pane_line "$widx" "$pidx" "$pcmd" "$ppath" "$ptitle" "$oc_sid"
+      local pane_sid=''
+      pane_sid=$(echo "$oc_lines" | awk -F'|' -v w="$widx" -v p="$pidx" '$1==w && $2==p {print $3; exit}')
+      [ -z "$pane_sid" ] && pane_sid=$(echo "$cc_lines" | awk -F'|' -v w="$widx" -v p="$pidx" '$1==w && $2==p {print $3; exit}')
+      pane_sid=$(_tmux_af_decode_field_if_needed "$fmt" "$pane_sid")
+      _pane_line "$widx" "$pidx" "$pcmd" "$ppath" "$ptitle" "$pane_sid"
     done
 
     oc_count=$(echo "$oc_lines" | grep -c '.' 2>/dev/null)
@@ -141,6 +153,21 @@ case "$mode" in
       _divider
       printf "\033[34m▸ opencode %s개 복원 가능\033[0m\n" "$oc_count"
       echo "$oc_lines" | while IFS='|' read -r widx pidx sid title dir; do
+        [ -z "$widx" ] && continue
+        sid=$(_tmux_af_decode_field_if_needed "$fmt" "$sid")
+        title=$(_tmux_af_decode_field_if_needed "$fmt" "$title")
+        dir=$(_tmux_af_decode_field_if_needed "$fmt" "$dir")
+        printf "  \033[36m%s\033[0m\n" "$title"
+        printf "  \033[90m%s  %s\033[0m\n" "$sid" "$dir"
+      done
+    fi
+
+    local cc_count
+    cc_count=$(echo "$cc_lines" | grep -c '.' 2>/dev/null)
+    if [ "$cc_count" -gt 0 ] 2>/dev/null; then
+      _divider
+      printf "\033[35m▸ claude-code %s개 복원 가능\033[0m\n" "$cc_count"
+      echo "$cc_lines" | while IFS='|' read -r widx pidx sid title dir; do
         [ -z "$widx" ] && continue
         sid=$(_tmux_af_decode_field_if_needed "$fmt" "$sid")
         title=$(_tmux_af_decode_field_if_needed "$fmt" "$title")

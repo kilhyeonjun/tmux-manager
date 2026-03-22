@@ -54,7 +54,9 @@ _tmux_archive_restore_unlocked() {
   local windows_raw panes_raw oc_section
   windows_raw=$(_tmux_af_section_lines "$file" '---WINDOWS---' '---PANES---')
   panes_raw=$(_tmux_af_section_lines "$file" '---PANES---' '---OPENCODE---')
-  oc_section=$(_tmux_af_section_lines "$file" '---OPENCODE---' '---CMUX---')
+  oc_section=$(_tmux_af_section_lines "$file" '---OPENCODE---' '---CLAUDE-CODE---')
+  local cc_section
+  cc_section=$(_tmux_af_section_lines "$file" '---CLAUDE-CODE---' '---CMUX---')
   if [ -z "$(echo "$panes_raw" | tr -d '[:space:]')" ]; then
     panes_raw=$(_tmux_af_section_lines "$file" '---PANES---' '')
   fi
@@ -135,6 +137,9 @@ _tmux_archive_restore_unlocked() {
   if typeset -f _tmux_oc_restore_metadata > /dev/null 2>&1; then
     _tmux_oc_restore_metadata "$file" "$session_name"
   fi
+  if typeset -f _tmux_cc_restore_metadata > /dev/null 2>&1; then
+    _tmux_cc_restore_metadata "$file" "$session_name"
+  fi
   if typeset -f _tmux_cmux_restore_metadata > /dev/null 2>&1; then
     _tmux_cmux_restore_metadata "$file" "$session_name"
   fi
@@ -142,6 +147,7 @@ _tmux_archive_restore_unlocked() {
   local base="${file%.archive}"
   local _TMUX_RESTORE_RUNNING_CMDS=''
   local _TMUX_RESTORE_OC_PANES=''
+  local _TMUX_RESTORE_CC_PANES=''
   local _TMUX_RESTORE_ARCHIVE_FMT="$fmt"
   local running_cmds=''
 
@@ -208,9 +214,19 @@ _tmux_archive_restore_unlocked() {
       [[ "$ptitle" == 'OpenCode' ]] && is_oc=true
       [ -n "$oc_line" ] && is_oc=true
 
+      local cc_line=''
+      cc_line=$(echo "$cc_section" | awk -F'|' -v w="$p_widx" -v p="$pidx" '$1==w && $2==p {print; exit}')
+      local is_cc=false
+      [[ "$ptitle" == '✳ '* ]] && is_cc=true
+      [ -n "$cc_line" ] && is_cc=true
+
       if [ "$is_oc" = true ]; then
         if typeset -f _tmux_oc_setup_restored_pane > /dev/null 2>&1; then
           _tmux_oc_setup_restored_pane "${session_name}:${widx}" "$p_widx" "$pidx" "$ptitle" "$ppath" "$oc_line" "$pane_target"
+        fi
+      elif [ "$is_cc" = true ]; then
+        if typeset -f _tmux_cc_setup_restored_pane > /dev/null 2>&1; then
+          _tmux_cc_setup_restored_pane "${session_name}:${widx}" "$p_widx" "$pidx" "$ptitle" "$ppath" "$cc_line" "$pane_target"
         fi
       elif [ -n "$pcmd" ] && [ "$pcmd" != 'zsh' ] && [ "$pcmd" != 'bash' ]; then
         running_cmds="${running_cmds}  w${p_widx}.${pidx}: \033[33m${pcmd}\033[0m (${ppath})\n"
@@ -226,6 +242,7 @@ _tmux_archive_restore_unlocked() {
 
   running_cmds="${_TMUX_RESTORE_RUNNING_CMDS}${running_cmds}"
   local oc_panes="$_TMUX_RESTORE_OC_PANES"
+  local cc_panes="$_TMUX_RESTORE_CC_PANES"
 
   echo "\033[32m✓ 복원 완료: $session_name\033[0m"
   if typeset -f _tmux_cmux_notify_restore > /dev/null 2>&1; then
@@ -238,5 +255,8 @@ _tmux_archive_restore_unlocked() {
 
   if [ -n "$oc_panes" ] && [[ -t 0 ]] && typeset -f _tmux_oc_prompt_restart > /dev/null 2>&1; then
     _tmux_oc_prompt_restart "$session_name" "$oc_panes"
+  fi
+  if [ -n "$cc_panes" ] && [[ -t 0 ]] && typeset -f _tmux_cc_prompt_restart > /dev/null 2>&1; then
+    _tmux_cc_prompt_restart "$session_name" "$cc_panes"
   fi
 }

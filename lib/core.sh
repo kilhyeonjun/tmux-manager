@@ -44,6 +44,7 @@ _tmux_archive_meta() {
       FS="\\|"
       in_windows=0
       in_oc=0
+      in_cc=0
       fmt=1
       name=""
       uuid=""
@@ -54,6 +55,10 @@ _tmux_archive_meta() {
       sid_missing=0
       oc_title=""
       oc_sid=""
+      cc_count=0
+      cc_sid_missing=0
+      cc_title=""
+      cc_sid=""
     }
     /^FORMAT_VERSION=/ {
       v=substr($0,16)
@@ -78,17 +83,27 @@ _tmux_archive_meta() {
     }
     /^---WINDOWS---$/ {
       in_windows=1
-      in_oc=0
+      in_oc=0; in_cc=0
       next
     }
     /^---PANES---$/ {
       in_windows=0
-      in_oc=0
+      in_oc=0; in_cc=0
       next
     }
     /^---OPENCODE---$/ {
       in_windows=0
-      in_oc=1
+      in_oc=1; in_cc=0
+      next
+    }
+    /^---CLAUDE-CODE---$/ {
+      in_windows=0
+      in_oc=0; in_cc=1
+      next
+    }
+    /^---CMUX---$/ {
+      in_windows=0
+      in_oc=0; in_cc=0
       next
     }
     {
@@ -104,21 +119,34 @@ _tmux_archive_meta() {
           if (oc_sid == "" && sid != "") oc_sid=sid
         }
       }
+      if (in_cc) {
+        widx=$1
+        sid=$3
+        title=$4
+        if (widx != "") {
+          cc_count++
+          if (sid == "") cc_sid_missing++
+          if (cc_title == "" && title != "") cc_title=title
+          if (cc_sid == "" && sid != "") cc_sid=sid
+        }
+      }
     }
     END {
       if (uuid=="") uuid="_legacy"
-      printf "%d\037%s\037%s\037%s\037%d\037%d\037%d\037%d\037%s\037%s", fmt, uuid, name, date, is_auto, wins, oc_count, sid_missing, oc_title, oc_sid
+      printf "%d\037%s\037%s\037%s\037%d\037%d\037%d\037%d\037%s\037%s\037%d\037%d\037%s\037%s", fmt, uuid, name, date, is_auto, wins, oc_count, sid_missing, oc_title, oc_sid, cc_count, cc_sid_missing, cc_title, cc_sid
     }
   ' "$file") || return 1
 
-  local fmt uuid name date is_auto wins oc_count sid_missing oc_title oc_sid
-  IFS=$'\037' read -r fmt uuid name date is_auto wins oc_count sid_missing oc_title oc_sid <<< "$parsed"
+  local fmt uuid name date is_auto wins oc_count sid_missing oc_title oc_sid cc_count cc_sid_missing cc_title cc_sid
+  IFS=$'\037' read -r fmt uuid name date is_auto wins oc_count sid_missing oc_title oc_sid cc_count cc_sid_missing cc_title cc_sid <<< "$parsed"
 
   name=$(_tmux_af_decode_field_if_needed "$fmt" "$name")
   oc_title=$(_tmux_af_decode_field_if_needed "$fmt" "$oc_title")
   oc_sid=$(_tmux_af_decode_field_if_needed "$fmt" "$oc_sid")
+  cc_title=$(_tmux_af_decode_field_if_needed "$fmt" "$cc_title")
+  cc_sid=$(_tmux_af_decode_field_if_needed "$fmt" "$cc_sid")
 
-  printf '%s|%s|%s|%d|%d|%d|%d|%s|%s\n' "$uuid" "$name" "$date" "$is_auto" "$wins" "$oc_count" "$sid_missing" "$oc_title" "$oc_sid"
+  printf '%s|%s|%s|%d|%d|%d|%d|%s|%s|%d|%d|%s|%s\n' "$uuid" "$name" "$date" "$is_auto" "$wins" "$oc_count" "$sid_missing" "$oc_title" "$oc_sid" "$cc_count" "$cc_sid_missing" "$cc_title" "$cc_sid"
 }
 
 _tmux_archive_meta_bulk() {
@@ -163,21 +191,30 @@ _tmux_archive_meta_bulk() {
       sid_missing=0
       oc_title=""
       oc_sid=""
+      cc_count=0
+      cc_sid_missing=0
+      cc_title=""
+      cc_sid=""
       in_windows=0
       in_oc=0
+      in_cc=0
     }
-    function emit_current(    out_name,out_title,out_sid) {
+    function emit_current(    out_name,out_oc_title,out_oc_sid,out_cc_title,out_cc_sid) {
       if (curr_file=="") return
       if (uuid=="") uuid="_legacy"
       out_name=name
-      out_title=oc_title
-      out_sid=oc_sid
+      out_oc_title=oc_title
+      out_oc_sid=oc_sid
+      out_cc_title=cc_title
+      out_cc_sid=cc_sid
       if (fmt>=2) {
         out_name=urldecode(out_name)
-        out_title=urldecode(out_title)
-        out_sid=urldecode(out_sid)
+        out_oc_title=urldecode(out_oc_title)
+        out_oc_sid=urldecode(out_oc_sid)
+        out_cc_title=urldecode(out_cc_title)
+        out_cc_sid=urldecode(out_cc_sid)
       }
-      printf "%s|%s|%s|%s|%d|%d|%d|%d|%s|%s\n", curr_file, uuid, out_name, date, is_auto, wins, oc_count, sid_missing, out_title, out_sid
+      printf "%s|%s|%s|%s|%d|%d|%d|%d|%s|%s|%d|%d|%s|%s\n", curr_file, uuid, out_name, date, is_auto, wins, oc_count, sid_missing, out_oc_title, out_oc_sid, cc_count, cc_sid_missing, out_cc_title, out_cc_sid
     }
     FNR==1 {
       emit_current()
@@ -207,17 +244,27 @@ _tmux_archive_meta_bulk() {
     }
     /^---WINDOWS---$/ {
       in_windows=1
-      in_oc=0
+      in_oc=0; in_cc=0
       next
     }
     /^---PANES---$/ {
       in_windows=0
-      in_oc=0
+      in_oc=0; in_cc=0
       next
     }
     /^---OPENCODE---$/ {
       in_windows=0
-      in_oc=1
+      in_oc=1; in_cc=0
+      next
+    }
+    /^---CLAUDE-CODE---$/ {
+      in_windows=0
+      in_oc=0; in_cc=1
+      next
+    }
+    /^---CMUX---$/ {
+      in_windows=0
+      in_oc=0; in_cc=0
       next
     }
     {
@@ -231,6 +278,17 @@ _tmux_archive_meta_bulk() {
           if (sid == "") sid_missing++
           if (oc_title == "" && title != "") oc_title=title
           if (oc_sid == "" && sid != "") oc_sid=sid
+        }
+      }
+      if (in_cc) {
+        widx=$1
+        sid=$3
+        title=$4
+        if (widx != "") {
+          cc_count++
+          if (sid == "") cc_sid_missing++
+          if (cc_title == "" && title != "") cc_title=title
+          if (cc_sid == "" && sid != "") cc_sid=sid
         }
       }
     }
@@ -266,7 +324,7 @@ _tmux_archive_groups() {
 _tmux_archives_for_uuid() {
   local target_uuid="$1"
   [ -z "$target_uuid" ] && return 1
-  _tmux_archive_meta_bulk | sort -t'|' -k4 -r | while IFS='|' read -r f uuid name date is_auto wins oc_count sid_missing oc_title oc_sid; do
+  _tmux_archive_meta_bulk | sort -t'|' -k4 -r | while IFS='|' read -r f uuid name date is_auto wins oc_count sid_missing oc_title oc_sid cc_count cc_sid_missing cc_title cc_sid; do
     [ -z "$f" ] && continue
     if [ "$uuid" = "$target_uuid" ]; then
       local tag=''
@@ -274,6 +332,10 @@ _tmux_archives_for_uuid() {
       if [ "$oc_count" -gt 0 ] 2>/dev/null; then
         tag="${tag} [OC:${oc_count}]"
         [ "$sid_missing" -gt 0 ] 2>/dev/null && tag="${tag} [sid?:${sid_missing}]"
+      fi
+      if [ "$cc_count" -gt 0 ] 2>/dev/null; then
+        tag="${tag} [CC:${cc_count}]"
+        [ "$cc_sid_missing" -gt 0 ] 2>/dev/null && tag="${tag} [cc-sid?:${cc_sid_missing}]"
       fi
       printf '%s|%s  %s  \033[90m%sw\033[0m%s\n' "$f" "$name" "$date" "$wins" "$tag"
     fi
@@ -285,7 +347,7 @@ _tmux_build_group_preview_cache() {
   local cache_file=$(mktemp -t tmux_group_preview)
   [ -z "$cache_file" ] && return 1
   typeset -A shown
-  _tmux_archive_meta_bulk | sort -t'|' -k4 -r | while IFS='|' read -r f uuid name date is_auto wins oc_count sid_missing oc_title oc_sid; do
+  _tmux_archive_meta_bulk | sort -t'|' -k4 -r | while IFS='|' read -r f uuid name date is_auto wins oc_count sid_missing oc_title oc_sid cc_count cc_sid_missing cc_title cc_sid; do
     [ -z "$f" ] && continue
     [ -z "$uuid" ] && uuid='_legacy'
     local n=${shown[$uuid]:-0}
@@ -296,10 +358,17 @@ _tmux_build_group_preview_cache() {
       tag="${tag} [OC:${oc_count}]"
       [ "$sid_missing" -gt 0 ] 2>/dev/null && tag="${tag} [sid?:${sid_missing}]"
     fi
+    if [ "$cc_count" -gt 0 ] 2>/dev/null; then
+      tag="${tag} [CC:${cc_count}]"
+      [ "$cc_sid_missing" -gt 0 ] 2>/dev/null && tag="${tag} [cc-sid?:${cc_sid_missing}]"
+    fi
     local title_hint=''
     if [ -n "$oc_title" ]; then
       title_hint=" - ${oc_title}"
       [ -n "$oc_sid" ] && title_hint="${title_hint} [${oc_sid}]"
+    elif [ -n "$cc_title" ]; then
+      title_hint=" - ${cc_title}"
+      [ -n "$cc_sid" ] && title_hint="${title_hint} [${cc_sid}]"
     fi
     printf '%s|%s  %s  %sw%s%s\n' "$uuid" "$name" "$date" "$wins" "$tag" "$title_hint" >> "$cache_file"
     shown[$uuid]=$((n + 1))
@@ -372,13 +441,43 @@ except: pass' > "$_TMUX_OC_INDEX_CACHE" 2>/dev/null || true
     fi
     export _TMUX_OC_DB="/Users/gameduo/.local/share/opencode/opencode.db"
   fi
+  # Claude Code process cache
+  local _cc_cli_path
+  _cc_cli_path=$(command -v claude 2>/dev/null)
+  if [ -n "$_cc_cli_path" ] && [[ "$_cc_cli_path" != *"Claude.app"* ]]; then
+    export _TMUX_CC_PS_CACHE=$(mktemp -t tmux_cc_ps)
+    if [ -n "$_TMUX_CC_PS_CACHE" ]; then
+      local _all_pane_pids_cc
+      _all_pane_pids_cc=$(tmux list-panes -a -F '#{pane_pid}' 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+      ps -axo pid=,ppid=,args= 2>/dev/null | awk -v roots="$_all_pane_pids_cc" '
+        BEGIN { split(roots, r, ","); for(i in r) root[r[i]+0]=1 }
+        { pid=$1+0; ppid=$2+0; $1=""; $2=""; a[pid]=$0; p[pid]=ppid }
+        END {
+          for(rt in root) {
+            queue[1]=rt; head=1; tail=1; found=0; fpid=0
+            while(head<=tail && !found) {
+              for(pid in p) {
+                if(p[pid]==queue[head]) {
+                  tail++; queue[tail]=pid
+                  if(a[pid] ~ /[[:space:]]claude([[:space:]]|$)/ && a[pid] !~ /Claude\.app/) { found=1; fpid=pid }
+                }
+              }
+              head++
+            }
+            delete queue
+            if(found) print rt "\tCC_RUNNING\t" fpid
+          }
+        }' > "$_TMUX_CC_PS_CACHE" 2>/dev/null || true
+    fi
+  fi
   echo "$sessions" | while read -r s; do
     _tmux_ensure_uuid "$s" >/dev/null
     tmux-archive save "$s" auto
   done
   [ -n "$_TMUX_OC_INDEX_CACHE" ] && rm -f "$_TMUX_OC_INDEX_CACHE" 2>/dev/null
   [ -n "$_TMUX_OC_PS_CACHE" ] && rm -f "$_TMUX_OC_PS_CACHE" 2>/dev/null
-  unset _TMUX_OC_INDEX_CACHE _TMUX_OC_PS_CACHE
+  [ -n "$_TMUX_CC_PS_CACHE" ] && rm -f "$_TMUX_CC_PS_CACHE" 2>/dev/null
+  unset _TMUX_OC_INDEX_CACHE _TMUX_OC_PS_CACHE _TMUX_CC_PS_CACHE
   local manifest="$TMUX_ARCHIVE_DIR/.last-active"
   {
     echo "# $(date '+%Y-%m-%d %H:%M:%S')"
@@ -509,6 +608,10 @@ _tmux_archive_save_unlocked() {
   echo "---OPENCODE---" >> "$tmp_file"
   if typeset -f _tmux_oc_capture_session > /dev/null 2>&1; then
     _tmux_oc_capture_session "$session" "$tmp_file" "${file%.archive}"
+  fi
+  echo "---CLAUDE-CODE---" >> "$tmp_file"
+  if typeset -f _tmux_cc_capture_session > /dev/null 2>&1; then
+    _tmux_cc_capture_session "$session" "$tmp_file" "${file%.archive}"
   fi
   echo "---CMUX---" >> "$tmp_file"
   if typeset -f _tmux_cmux_capture_session > /dev/null 2>&1; then

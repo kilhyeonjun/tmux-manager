@@ -186,7 +186,7 @@ _tmux_oc_restore_metadata() {
   local fmt
   fmt=$(_tmux_af_format_version "$file")
   local oc_saved_lines
-  oc_saved_lines=$(_tmux_af_section_lines "$file" '---OPENCODE---' '---CMUX---')
+  oc_saved_lines=$(_tmux_af_section_lines "$file" '---OPENCODE---' '---CLAUDE-CODE---')
   local oc_saved_count=0 oc_saved_sid_missing=0
   local oc_saved_titles='' oc_saved_sids=''
   local widx pidx sid title dir

@@ -37,6 +37,8 @@ SCROLLBACK_MODE=full
 $name|1|0|/tmp|zsh|zsh
 $name|2|0|/home|vim|vim
 ---OPENCODE---
+---CLAUDE-CODE---
+---CMUX---
 EOF
   echo "$file"
 }
@@ -61,6 +63,8 @@ SCROLLBACK_LINES=200
 ---PANES---
 $name|1|0|/tmp|zsh|zsh
 ---OPENCODE---
+---CLAUDE-CODE---
+---CMUX---
 EOF
   echo "$file"
 }
