@@ -8,7 +8,7 @@ source "$TMUX_MANAGER_DIR/lib/core.sh"
 _tmux_ensure_uuid "$@"
 
 # Sync cmux workspace tab name to the new session name
-if [[ "$TERM_PROGRAM" == 'cmux' ]] || [[ -S "${CMUX_SOCKET:-}" ]]; then
+if [[ -n "${CMUX_BUNDLE_ID:-}" ]] || [[ -S "${CMUX_SOCKET_PATH:-}" ]]; then
   if command -v cmux &>/dev/null; then
     _cmux_sn=$(tmux display-message -p '#{session_name}' 2>/dev/null)
     if [ -n "$_cmux_sn" ]; then
