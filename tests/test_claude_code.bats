@@ -488,16 +488,14 @@ EOF
   echo "$result" | grep -q 'dangerously-skip-permissions'
 }
 
-@test "cc_setup_restored_pane always does cd even when cc_dir equals ppath" {
-  # Verify source code: cd block should check [ -n "$cc_dir" ] only, not cc_dir != ppath
-  local cd_guard
-  cd_guard=$(zsh -c "
+@test "cc_setup_restored_pane delegates banner to hook script" {
+  # Verify setup_restored_pane does NOT send echo banners (hook script handles it)
+  result=$(zsh -c "
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
     typeset -f _tmux_cc_setup_restored_pane
-  " | grep -A1 'if \[' | grep 'cc_dir')
-  # Should NOT contain 'ppath' in the cd guard
-  ! echo "$cd_guard" | grep -q 'ppath'
+  ")
+  ! echo "$result" | grep -q 'send-keys.*echo.*ARCHIVED'
 }
 
 @test "cc_prompt_restart global batch variable resets between restore-at calls" {
