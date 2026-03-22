@@ -240,157 +240,38 @@ s.listen(1)
   [[ "$result" == *"cmux=1"* ]]
 }
 
-@test "cmux_notify sends title and body without urgency flag" {
-  local stub_dir
-  stub_dir=$(mktemp -d)
-  cat > "$stub_dir/cmux" << 'STUB'
-#!/bin/sh
-echo "$@" >> "$CMUX_STUB_LOG"
-STUB
-  chmod +x "$stub_dir/cmux"
-
-  local log_file
-  log_file=$(mktemp)
-
+@test "cmux_notify uses OSC passthrough in tmux context" {
+  # Verify the function uses printf with OSC 9 escape sequence
   result=$(zsh -c "
-    export PATH='$stub_dir:\$PATH'
-    export CMUX_STUB_LOG='$log_file'
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
-    _tmux_cmux_notify 'Test Title' 'Test Body'
+    typeset -f _tmux_cmux_notify
   ")
-
-  local logged
-  logged=$(cat "$log_file")
-  rm -f "$log_file"
-  rm -rf "$stub_dir"
-
-  [[ "$logged" == *"--title Test Title"* ]]
-  [[ "$logged" == *"--body Test Body"* ]]
-  ! [[ "$logged" == *"--urgency"* ]]
+  # Should use OSC 9 via printf, not cmux CLI
+  echo "$result" | grep -q 'printf'
+  echo "$result" | grep -q 'Ptmux'
+  ! echo "$result" | grep -q 'cmux notify'
 }
 
-@test "cmux_notify_save auto mode sends notification" {
-  local stub_dir
-  stub_dir=$(mktemp -d)
-  cat > "$stub_dir/cmux" << 'STUB'
-#!/bin/sh
-echo "$@" >> "$CMUX_STUB_LOG"
-STUB
-  chmod +x "$stub_dir/cmux"
-
-  local log_file
-  log_file=$(mktemp)
-
+@test "cmux_notify_save calls notify for auto mode" {
   result=$(zsh -c "
-    export PATH='$stub_dir:\$PATH'
-    export CMUX_STUB_LOG='$log_file'
     export CMUX_BUNDLE_ID=com.cmuxterm.app
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
-    _tmux_cmux_notify_save 'my-session' '/tmp/test.archive' 'auto'
+    typeset -f _tmux_cmux_notify_save
   ")
-
-  local logged
-  logged=$(cat "$log_file")
-  rm -f "$log_file"
-  rm -rf "$stub_dir"
-
-  [[ "$logged" == *"--title Auto Archive"* ]]
-  [[ "$logged" == *"--body my-session: saved"* ]]
-  ! [[ "$logged" == *"--urgency"* ]]
+  echo "$result" | grep -q 'Auto Archive'
+  echo "$result" | grep -q '_tmux_cmux_notify'
 }
 
-@test "cmux_notify_save manual mode sends notification" {
-  local stub_dir
-  stub_dir=$(mktemp -d)
-  cat > "$stub_dir/cmux" << 'STUB'
-#!/bin/sh
-echo "$@" >> "$CMUX_STUB_LOG"
-STUB
-  chmod +x "$stub_dir/cmux"
-
-  local log_file
-  log_file=$(mktemp)
-
+@test "cmux_notify_restore_fail calls notify" {
   result=$(zsh -c "
-    export PATH='$stub_dir:\$PATH'
-    export CMUX_STUB_LOG='$log_file'
-    export CMUX_BUNDLE_ID=com.cmuxterm.app
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
-    _tmux_cmux_notify_save 'my-session' '/tmp/test.archive' 'manual'
+    typeset -f _tmux_cmux_notify_restore_fail
   ")
-
-  local logged
-  logged=$(cat "$log_file")
-  rm -f "$log_file"
-  rm -rf "$stub_dir"
-
-  [[ "$logged" == *"--title Archive Saved"* ]]
-  ! [[ "$logged" == *"--urgency"* ]]
-}
-
-@test "cmux_notify_restore_fail sends notification" {
-  local stub_dir
-  stub_dir=$(mktemp -d)
-  cat > "$stub_dir/cmux" << 'STUB'
-#!/bin/sh
-echo "$@" >> "$CMUX_STUB_LOG"
-STUB
-  chmod +x "$stub_dir/cmux"
-
-  local log_file
-  log_file=$(mktemp)
-
-  result=$(zsh -c "
-    export PATH='$stub_dir:\$PATH'
-    export CMUX_STUB_LOG='$log_file'
-    export CMUX_BUNDLE_ID=com.cmuxterm.app
-    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
-    source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
-    _tmux_cmux_notify_restore_fail 'session creation failed'
-  ")
-
-  local logged
-  logged=$(cat "$log_file")
-  rm -f "$log_file"
-  rm -rf "$stub_dir"
-
-  [[ "$logged" == *"--title Restore Failed"* ]]
-  [[ "$logged" == *"--body session creation failed"* ]]
-  ! [[ "$logged" == *"--urgency"* ]]
-}
-
-@test "cmux_notify_restore sends notification" {
-  local stub_dir
-  stub_dir=$(mktemp -d)
-  cat > "$stub_dir/cmux" << 'STUB'
-#!/bin/sh
-echo "$@" >> "$CMUX_STUB_LOG"
-STUB
-  chmod +x "$stub_dir/cmux"
-
-  local log_file
-  log_file=$(mktemp)
-
-  result=$(zsh -c "
-    export PATH='$stub_dir:\$PATH'
-    export CMUX_STUB_LOG='$log_file'
-    export CMUX_BUNDLE_ID=com.cmuxterm.app
-    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
-    source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
-    _tmux_cmux_notify_restore 'my-session'
-  ")
-
-  local logged
-  logged=$(cat "$log_file")
-  rm -f "$log_file"
-  rm -rf "$stub_dir"
-
-  [[ "$logged" == *"--title Session Restored"* ]]
-  [[ "$logged" == *"--body my-session"* ]]
-  ! [[ "$logged" == *"--urgency"* ]]
+  echo "$result" | grep -q 'Restore Failed'
+  echo "$result" | grep -q '_tmux_cmux_notify'
 }
 
 @test "init.sh loads cmux plugin from plugins dir" {

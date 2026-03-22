@@ -174,6 +174,36 @@ with open('$proj_dir/sessions-index.json') as f:
   [ "$result" = "sid-bbb" ]
 }
 
+@test "cc_detect_sid_from_sessions rejects generic cwd /Users" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  mkdir -p "$tmpdir/.claude/sessions"
+  echo '{"pid":111,"sessionId":"sid-aaa","cwd":"/Users","startedAt":1000}' > "$tmpdir/.claude/sessions/111.json"
+
+  result=$(HOME="$tmpdir" zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_detect_sid_from_sessions '/Users' && echo found || echo rejected
+  ")
+  rm -rf "$tmpdir"
+  [ "$result" = "rejected" ]
+}
+
+@test "cc_detect_sid_from_sessions rejects generic cwd home dir" {
+  local tmpdir
+  tmpdir=$(mktemp -d)
+  mkdir -p "$tmpdir/.claude/sessions"
+  echo "{\"pid\":111,\"sessionId\":\"sid-aaa\",\"cwd\":\"$tmpdir\",\"startedAt\":1000}" > "$tmpdir/.claude/sessions/111.json"
+
+  result=$(HOME="$tmpdir" zsh -c "
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
+    _tmux_cc_detect_sid_from_sessions '$tmpdir' && echo found || echo rejected
+  ")
+  rm -rf "$tmpdir"
+  [ "$result" = "rejected" ]
+}
+
 @test "cc_detect_sid_from_sessions returns empty for non-matching cwd" {
   local tmpdir
   tmpdir=$(mktemp -d)

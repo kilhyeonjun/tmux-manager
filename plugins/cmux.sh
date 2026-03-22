@@ -23,12 +23,17 @@ _tmux_cmux_has_cli() {
 
 
 # ── Notification ───────────────────────────────────────────────────────────
-# Send a notification via cmux notify CLI.
-# Usage: _tmux_cmux_notify <title> <body>
+# Send a notification via OSC passthrough (bypasses cmux socket auth).
+# Falls back to cmux CLI if passthrough is unavailable.
 _tmux_cmux_notify() {
-  _tmux_cmux_has_cli || return 0
   local title="$1" body="$2"
-  cmux notify --title "$title" --body "$body" 2>/dev/null || true
+  # OSC 9 (iTerm2/cmux compatible) via tmux passthrough
+  if [ -n "$TMUX" ]; then
+    printf '\ePtmux;\e\e]9;%s: %s\a\e\\' "$title" "$body" 2>/dev/null || true
+    return 0
+  fi
+  # Direct OSC 9 (outside tmux)
+  printf '\e]9;%s: %s\a' "$title" "$body" 2>/dev/null || true
 }
 
 # Called after successful archive save

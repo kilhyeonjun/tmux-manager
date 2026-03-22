@@ -74,6 +74,9 @@ _tmux_cc_detect_sid_from_sessions() {
   python3 -c "
 import json, glob, os, sys
 cwd = '''${pane_cwd}'''
+# Reject generic cwds that would match unrelated sessions
+if cwd in ('/', '/Users', os.path.expanduser('~'), '/tmp'):
+    sys.exit(1)
 best_sid, best_time = '', 0
 for f in glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'sessions', '*.json')):
     try:
@@ -162,14 +165,14 @@ _tmux_cc_capture_session() {
     local pane_pid claude_pid
     pane_pid=$(tmux display-message -p -t "$_pid" '#{pane_pid}' 2>/dev/null)
 
-    # Check process cache
+    # Check process cache — only trust pane title if a running process is found
     if [ -n "$pane_pid" ] && [ -n "$_cc_ps" ]; then
       claude_pid=$(echo "$_cc_ps" | awk -F'\t' -v p="$pane_pid" '$1+0==p+0 {print $3; exit}')
       [ -n "$claude_pid" ] && is_cc_running=true
     fi
 
-    # Check pane title
-    _tmux_cc_is_pane_title "$_title" && is_cc_running=true
+    # Pane title alone is NOT sufficient — it can be stale after CC exits.
+    # Only use title as supplementary info when process is confirmed above.
 
     if [ "$is_cc_running" = true ]; then
       local cc_sid=''
@@ -295,20 +298,9 @@ _tmux_cc_setup_restored_pane() {
   cc_dir=$(_tmux_af_decode_field_if_needed "$fmt" "$cc_dir")
   [ -z "$cc_dir" ] && cc_dir="$ppath"
 
+  # Banner display is handled by the hook script (_tmux_cc_build_hook_script)
+  # to avoid duplication. Here we only set up pane metadata for the prompt.
   if [ -n "$cc_sid" ]; then
-    if [ -n "$cc_dir" ]; then
-      local qdir
-      qdir=$(printf '%q' "$cc_dir")
-      tmux send-keys -t "$pane_target" "cd -- $qdir" Enter
-    fi
-    tmux send-keys -t "$pane_target" " echo ''" Enter
-    tmux send-keys -t "$pane_target" " echo '  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'" Enter
-    tmux send-keys -t "$pane_target" " echo '  [ARCHIVED CLAUDE-CODE]'" Enter
-    tmux send-keys -t "$pane_target" " echo '  TITLE : ${cc_title}'" Enter
-    tmux send-keys -t "$pane_target" " echo '  SID   : ${cc_sid}'" Enter
-    tmux send-keys -t "$pane_target" " echo '  RUN   : claude --resume ${cc_sid}'" Enter
-    tmux send-keys -t "$pane_target" " echo '  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'" Enter
-    tmux send-keys -t "$pane_target" " echo ''" Enter
     _TMUX_RESTORE_RUNNING_CMDS="${_TMUX_RESTORE_RUNNING_CMDS}  w${widx}.${pidx}: \033[35mclaude-code\033[0m (\"\033[36m${cc_title}\033[0m\")\n           → cd ${cc_dir} && claude --resume ${cc_sid}\n"
     local esc_sid esc_dir esc_title
     esc_sid=$(_tmux_af_escape "$cc_sid")
@@ -316,14 +308,6 @@ _tmux_cc_setup_restored_pane() {
     esc_title=$(_tmux_af_escape "$cc_title")
     _TMUX_RESTORE_CC_PANES="${_TMUX_RESTORE_CC_PANES}${pane_target}|${esc_sid}|${esc_dir}|${esc_title}\n"
   else
-    tmux send-keys -t "$pane_target" " echo ''" Enter
-    tmux send-keys -t "$pane_target" " echo '  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'" Enter
-    tmux send-keys -t "$pane_target" " echo '  [ARCHIVED CLAUDE-CODE]'" Enter
-    tmux send-keys -t "$pane_target" " echo '  TITLE : ${cc_title}'" Enter
-    tmux send-keys -t "$pane_target" " echo '  SID   : (없음 - 새 세션으로 시작하세요)'" Enter
-    tmux send-keys -t "$pane_target" " echo '  RUN   : claude'" Enter
-    tmux send-keys -t "$pane_target" " echo '  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━'" Enter
-    tmux send-keys -t "$pane_target" " echo ''" Enter
     _TMUX_RESTORE_RUNNING_CMDS="${_TMUX_RESTORE_RUNNING_CMDS}  w${widx}.${pidx}: \033[35mclaude-code\033[0m (\"${cc_title}\")\n           → claude\n"
     local esc_ppath esc_title
     esc_ppath=$(_tmux_af_escape "$ppath")
