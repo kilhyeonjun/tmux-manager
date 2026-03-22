@@ -21,6 +21,18 @@ _tmux_cmux_has_cli() {
   command -v cmux &>/dev/null
 }
 
+# ── tmux server startup ───────────────────────────────────────────────────
+# When inside cmux, start tmux server with -D (no-daemon) so that
+# run-shell subprocesses maintain cmux process ancestry for socket auth.
+# Returns the extra flags to pass to `tmux new-session`.
+_tmux_cmux_server_flags() {
+  _tmux_cmux_is_inside || return 0
+  # Only add -D if tmux server is not already running
+  if ! tmux list-sessions &>/dev/null 2>&1; then
+    echo '-D'
+  fi
+}
+
 # ── Notification ───────────────────────────────────────────────────────────
 # Send a notification via cmux notify CLI.
 # Usage: _tmux_cmux_notify <title> <body>
