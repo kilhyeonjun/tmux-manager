@@ -240,6 +240,185 @@ s.listen(1)
   [[ "$result" == *"cmux=1"* ]]
 }
 
+@test "cmux_notify passes urgency value correctly to cmux CLI" {
+  # Stub cmux to capture the arguments it receives
+  local stub_dir
+  stub_dir=$(mktemp -d)
+  cat > "$stub_dir/cmux" << 'STUB'
+#!/bin/sh
+# Capture all arguments to a log file
+echo "$@" >> "$CMUX_STUB_LOG"
+STUB
+  chmod +x "$stub_dir/cmux"
+
+  local log_file
+  log_file=$(mktemp)
+
+  result=$(zsh -c "
+    export PATH='$stub_dir:\$PATH'
+    export CMUX_STUB_LOG='$log_file'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
+    _tmux_cmux_notify 'Test Title' 'Test Body' low
+  ")
+
+  local logged
+  logged=$(cat "$log_file")
+  rm -f "$log_file"
+  rm -rf "$stub_dir"
+
+  # Should contain: notify --title Test Title --body Test Body --urgency low
+  [[ "$logged" == *"--urgency low"* ]]
+  # Must NOT contain double --urgency (the old bug)
+  ! [[ "$logged" == *"--urgency --urgency"* ]]
+}
+
+@test "cmux_notify defaults urgency to normal when not specified" {
+  local stub_dir
+  stub_dir=$(mktemp -d)
+  cat > "$stub_dir/cmux" << 'STUB'
+#!/bin/sh
+echo "$@" >> "$CMUX_STUB_LOG"
+STUB
+  chmod +x "$stub_dir/cmux"
+
+  local log_file
+  log_file=$(mktemp)
+
+  result=$(zsh -c "
+    export PATH='$stub_dir:\$PATH'
+    export CMUX_STUB_LOG='$log_file'
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
+    _tmux_cmux_notify 'Title' 'Body'
+  ")
+
+  local logged
+  logged=$(cat "$log_file")
+  rm -f "$log_file"
+  rm -rf "$stub_dir"
+
+  [[ "$logged" == *"--urgency normal"* ]]
+}
+
+@test "cmux_notify_save auto mode passes low urgency" {
+  local stub_dir
+  stub_dir=$(mktemp -d)
+  cat > "$stub_dir/cmux" << 'STUB'
+#!/bin/sh
+echo "$@" >> "$CMUX_STUB_LOG"
+STUB
+  chmod +x "$stub_dir/cmux"
+
+  local log_file
+  log_file=$(mktemp)
+
+  result=$(zsh -c "
+    export PATH='$stub_dir:\$PATH'
+    export CMUX_STUB_LOG='$log_file'
+    export CMUX_BUNDLE_ID=com.cmuxterm.app
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
+    _tmux_cmux_notify_save 'my-session' '/tmp/test.archive' 'auto'
+  ")
+
+  local logged
+  logged=$(cat "$log_file")
+  rm -f "$log_file"
+  rm -rf "$stub_dir"
+
+  [[ "$logged" == *"--urgency low"* ]]
+  ! [[ "$logged" == *"--urgency --urgency"* ]]
+}
+
+@test "cmux_notify_save manual mode passes normal urgency" {
+  local stub_dir
+  stub_dir=$(mktemp -d)
+  cat > "$stub_dir/cmux" << 'STUB'
+#!/bin/sh
+echo "$@" >> "$CMUX_STUB_LOG"
+STUB
+  chmod +x "$stub_dir/cmux"
+
+  local log_file
+  log_file=$(mktemp)
+
+  result=$(zsh -c "
+    export PATH='$stub_dir:\$PATH'
+    export CMUX_STUB_LOG='$log_file'
+    export CMUX_BUNDLE_ID=com.cmuxterm.app
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
+    _tmux_cmux_notify_save 'my-session' '/tmp/test.archive' 'manual'
+  ")
+
+  local logged
+  logged=$(cat "$log_file")
+  rm -f "$log_file"
+  rm -rf "$stub_dir"
+
+  [[ "$logged" == *"--urgency normal"* ]]
+}
+
+@test "cmux_notify_restore_fail passes critical urgency" {
+  local stub_dir
+  stub_dir=$(mktemp -d)
+  cat > "$stub_dir/cmux" << 'STUB'
+#!/bin/sh
+echo "$@" >> "$CMUX_STUB_LOG"
+STUB
+  chmod +x "$stub_dir/cmux"
+
+  local log_file
+  log_file=$(mktemp)
+
+  result=$(zsh -c "
+    export PATH='$stub_dir:\$PATH'
+    export CMUX_STUB_LOG='$log_file'
+    export CMUX_BUNDLE_ID=com.cmuxterm.app
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
+    _tmux_cmux_notify_restore_fail 'session creation failed'
+  ")
+
+  local logged
+  logged=$(cat "$log_file")
+  rm -f "$log_file"
+  rm -rf "$stub_dir"
+
+  [[ "$logged" == *"--urgency critical"* ]]
+  ! [[ "$logged" == *"--urgency --urgency"* ]]
+}
+
+@test "cmux_notify_restore passes normal urgency" {
+  local stub_dir
+  stub_dir=$(mktemp -d)
+  cat > "$stub_dir/cmux" << 'STUB'
+#!/bin/sh
+echo "$@" >> "$CMUX_STUB_LOG"
+STUB
+  chmod +x "$stub_dir/cmux"
+
+  local log_file
+  log_file=$(mktemp)
+
+  result=$(zsh -c "
+    export PATH='$stub_dir:\$PATH'
+    export CMUX_STUB_LOG='$log_file'
+    export CMUX_BUNDLE_ID=com.cmuxterm.app
+    source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
+    source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
+    _tmux_cmux_notify_restore 'my-session'
+  ")
+
+  local logged
+  logged=$(cat "$log_file")
+  rm -f "$log_file"
+  rm -rf "$stub_dir"
+
+  [[ "$logged" == *"--urgency normal"* ]]
+}
+
 @test "init.sh loads cmux plugin from plugins dir" {
   result=$(zsh -c "
     export TMUX_MANAGER_DIR='$TMUX_MANAGER_DIR'

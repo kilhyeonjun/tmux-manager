@@ -35,7 +35,7 @@ _tmux_cmux_notify_save() {
   local session="$1" file="$2" auto_mode="$3"
   _tmux_cmux_is_inside || return 0
   if [ "$auto_mode" = 'auto' ]; then
-    _tmux_cmux_notify "Auto Archive" "${session}: saved" --urgency low
+    _tmux_cmux_notify "Auto Archive" "${session}: saved" low
   else
     _tmux_cmux_notify "Archive Saved" "${session}: $(basename "$file")"
   fi
@@ -52,7 +52,7 @@ _tmux_cmux_notify_restore() {
 _tmux_cmux_notify_restore_fail() {
   local reason="$1"
   _tmux_cmux_is_inside || return 0
-  _tmux_cmux_notify "Restore Failed" "$reason" --urgency critical
+  _tmux_cmux_notify "Restore Failed" "$reason" critical
 }
 
 # ── Workspace rename ──────────────────────────────────────────────────
