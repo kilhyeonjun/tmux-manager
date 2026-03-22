@@ -2,7 +2,7 @@
 # tmux-manager — auto-archive cron/LaunchAgent script
 # Schedule with crontab or LaunchAgent to snapshot all active sessions.
 
-export PATH="$HOME/.opencode/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="$HOME/.local/bin:$HOME/.opencode/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 export LANG="en_US.UTF-8"
 export LC_ALL="en_US.UTF-8"
 
