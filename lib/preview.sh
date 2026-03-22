@@ -124,7 +124,7 @@ case "$mode" in
     printf "\033[90m%s  %sw %sp\033[0m\n" "$date" "$wins" "$panes"
     _divider
 
-    oc_lines=$(_tmux_af_section_lines "$file" '---OPENCODE---' '')
+    oc_lines=$(_tmux_af_section_lines "$file" '---OPENCODE---' '---CMUX---')
     echo "$panes_raw" | while IFS='|' read -r sn widx pidx ppath pcmd ptitle; do
       [ -z "$sn" ] && continue
       sn=$(_tmux_af_decode_field_if_needed "$fmt" "$sn")

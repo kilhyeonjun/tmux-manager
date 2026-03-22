@@ -54,7 +54,7 @@ _tmux_archive_restore_unlocked() {
   local windows_raw panes_raw oc_section
   windows_raw=$(_tmux_af_section_lines "$file" '---WINDOWS---' '---PANES---')
   panes_raw=$(_tmux_af_section_lines "$file" '---PANES---' '---OPENCODE---')
-  oc_section=$(_tmux_af_section_lines "$file" '---OPENCODE---' '')
+  oc_section=$(_tmux_af_section_lines "$file" '---OPENCODE---' '---CMUX---')
   if [ -z "$(echo "$panes_raw" | tr -d '[:space:]')" ]; then
     panes_raw=$(_tmux_af_section_lines "$file" '---PANES---' '')
   fi
@@ -93,6 +93,9 @@ _tmux_archive_restore_unlocked() {
 
   tmux new-session -d -s "$session_name" -x "$_restore_w" -y "$_restore_h" || {
     echo "\033[31m복원 실패: 세션 생성 실패\033[0m"
+    if typeset -f _tmux_cmux_notify_restore_fail > /dev/null 2>&1; then
+      _tmux_cmux_notify_restore_fail "세션 생성 실패: $session_name"
+    fi
     return 1
   }
   local created_session=1
@@ -131,6 +134,9 @@ _tmux_archive_restore_unlocked() {
 
   if typeset -f _tmux_oc_restore_metadata > /dev/null 2>&1; then
     _tmux_oc_restore_metadata "$file" "$session_name"
+  fi
+  if typeset -f _tmux_cmux_restore_metadata > /dev/null 2>&1; then
+    _tmux_cmux_restore_metadata "$file" "$session_name"
   fi
 
   local base="${file%.archive}"
@@ -222,6 +228,9 @@ _tmux_archive_restore_unlocked() {
   local oc_panes="$_TMUX_RESTORE_OC_PANES"
 
   echo "\033[32m✓ 복원 완료: $session_name\033[0m"
+  if typeset -f _tmux_cmux_notify_restore > /dev/null 2>&1; then
+    _tmux_cmux_notify_restore "$session_name"
+  fi
   if [ -n "$running_cmds" ]; then
     echo "\033[33m⚠ 다음 프로세스는 수동 재시작 필요:\033[0m"
     echo -e "$running_cmds"

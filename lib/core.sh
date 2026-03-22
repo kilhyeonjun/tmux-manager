@@ -510,6 +510,10 @@ _tmux_archive_save_unlocked() {
   if typeset -f _tmux_oc_capture_session > /dev/null 2>&1; then
     _tmux_oc_capture_session "$session" "$tmp_file" "${file%.archive}"
   fi
+  echo "---CMUX---" >> "$tmp_file"
+  if typeset -f _tmux_cmux_capture_session > /dev/null 2>&1; then
+    _tmux_cmux_capture_session "$session" "$tmp_file" "${file%.archive}"
+  fi
   if ! mv -f "$tmp_file" "$file"; then
     rm -f "$tmp_file"
     echo "\033[31m아카이브 파일 finalize 실패: $session\033[0m"
@@ -549,6 +553,9 @@ _tmux_archive_save_unlocked() {
     fi
   done
   [ "$auto_mode" != 'auto' ] && echo "\033[32m✓ 아카이브 저장: $session → $file\033[0m"
+  if typeset -f _tmux_cmux_notify_save > /dev/null 2>&1; then
+    _tmux_cmux_notify_save "$session" "$file" "$auto_mode"
+  fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -964,7 +971,7 @@ _tmux_archive_level2() {
       else
         tmux-archive restore "$achoice" || { echo "\033[31m복원 실패\033[0m"; sleep 0.8; continue; }
       fi
-      if _tmux_af_section_lines "$achoice" '---OPENCODE---' '' | grep -q '^[0-9]'; then
+      if _tmux_af_section_lines "$achoice" '---OPENCODE---' '---CMUX---' | grep -q '^[0-9]'; then
         sleep 1.5
       fi
       if _tmux_enter_session "$session_name"; then
