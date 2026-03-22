@@ -685,6 +685,8 @@ ARCHIVED_AT=$(echo "$ts" | sed 's/_/ /; s/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2
 ---PANES---
 $name|1|0|/tmp|zsh|zsh
 ---OPENCODE---
+---CLAUDE-CODE---
+---CMUX---
 EOF
   echo "$file"
 }
@@ -732,9 +734,11 @@ EOF
 }
 
 @test "restore-at finds archives by HHMM format" {
-  create_timestamped_archive "sess-a" "20260312_133500"
-  create_timestamped_archive "sess-b" "20260312_133501"
-  create_timestamped_archive "sess-other" "20260312_140000"
+  local today
+  today=$(date +%Y%m%d)
+  create_timestamped_archive "sess-a" "${today}_133500"
+  create_timestamped_archive "sess-b" "${today}_133501"
+  create_timestamped_archive "sess-other" "${today}_140000"
 
   result=$(zsh -c "
     source '$TMUX_MANAGER_DIR/conf/defaults.conf'
@@ -752,7 +756,9 @@ EOF
 }
 
 @test "restore-at parses HHMM without colon" {
-  create_timestamped_archive "no-colon" "20260312_143200"
+  local today
+  today=$(date +%Y%m%d)
+  create_timestamped_archive "no-colon" "${today}_143200"
 
   result=$(zsh -c "
     source '$TMUX_MANAGER_DIR/conf/defaults.conf'
