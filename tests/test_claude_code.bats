@@ -24,7 +24,7 @@ load helpers/setup
   [ "$result" = "yes" ]
 }
 
-@test "CC pane title with braille spinner '⠐ Claude Code' is detected" {
+@test "CC pane title with braille dot-5 spinner is detected" {
   result=$(zsh -c "
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
@@ -33,7 +33,7 @@ load helpers/setup
   [ "$result" = "yes" ]
 }
 
-@test "CC pane title with braille spinner '⠂ Claude Code' is detected" {
+@test "CC pane title with braille dot-2 spinner is detected" {
   result=$(zsh -c "
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
@@ -42,7 +42,7 @@ load helpers/setup
   [ "$result" = "yes" ]
 }
 
-@test "CC pane title with braille spinner '⠋ My Session' is detected" {
+@test "CC pane title with braille dots-12 spinner is detected" {
   result=$(zsh -c "
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/claude-code.sh'
