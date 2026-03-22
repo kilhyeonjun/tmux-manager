@@ -16,7 +16,7 @@ if [[ -n "${CMUX_BUNDLE_ID:-}" ]] || [[ -S "${CMUX_SOCKET_PATH:-}" ]]; then
       _cmux_label="$_cmux_sn"
       _cmux_br=$(git -C "$_cmux_cwd" rev-parse --abbrev-ref HEAD 2>/dev/null)
       [ -n "$_cmux_br" ] && _cmux_label="${_cmux_sn} (${_cmux_br})"
-      cmux rename-workspace "$_cmux_label" 2>/dev/null || true
+      cmux rename-tab "$_cmux_label" 2>/dev/null || true
     fi
     unset _cmux_sn _cmux_cwd _cmux_label _cmux_br
   fi

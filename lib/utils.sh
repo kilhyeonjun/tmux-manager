@@ -15,12 +15,12 @@ _tmux_enter_session() {
   else
     tmux attach -t "$session_name" 2>/dev/null && result=0
   fi
-  if [ "$result" -eq 0 ] && typeset -f _tmux_cmux_rename_workspace > /dev/null 2>&1; then
+  if [ "$result" -eq 0 ] && typeset -f _tmux_cmux_rename_tab > /dev/null 2>&1; then
     local cwd
     cwd=$(tmux display-message -t "$session_name" -p '#{pane_current_path}' 2>/dev/null)
     local label
     label=$(_tmux_cmux_workspace_label "$session_name" "$cwd")
-    _tmux_cmux_rename_workspace "$label"
+    _tmux_cmux_rename_tab "$label"
   fi
   return "$result"
 }

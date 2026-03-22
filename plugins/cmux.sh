@@ -61,15 +61,15 @@ _tmux_cmux_notify_restore_fail() {
   _tmux_cmux_notify "Restore Failed" "$reason"
 }
 
-# ── Workspace rename ──────────────────────────────────────────────────
-# Rename the cmux workspace tab to match the tmux session name.
+# ── Tab rename ────────────────────────────────────────────────────────
+# Rename the cmux tab to match the tmux session name.
 # Optionally appends git branch info when available.
-_tmux_cmux_rename_workspace() {
+_tmux_cmux_rename_tab() {
   _tmux_cmux_is_inside || return 0
   _tmux_cmux_has_cli || return 0
   local name="$1"
   [ -z "$name" ] && return 0
-  cmux rename-workspace "$name" 2>/dev/null || true
+  cmux rename-tab "$name" 2>/dev/null || true
 }
 
 # Build a workspace label from session name + optional git branch.

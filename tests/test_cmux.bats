@@ -37,7 +37,7 @@ EOF
     typeset -f _tmux_cmux_notify_save >/dev/null && echo 'notify_save:ok'
     typeset -f _tmux_cmux_notify_restore >/dev/null && echo 'notify_restore:ok'
     typeset -f _tmux_cmux_notify_restore_fail >/dev/null && echo 'notify_restore_fail:ok'
-    typeset -f _tmux_cmux_rename_workspace >/dev/null && echo 'rename_workspace:ok'
+    typeset -f _tmux_cmux_rename_tab >/dev/null && echo 'rename_tab:ok'
     typeset -f _tmux_cmux_workspace_label >/dev/null && echo 'workspace_label:ok'
     typeset -f _tmux_cmux_capture_session >/dev/null && echo 'capture_session:ok'
     typeset -f _tmux_cmux_restore_metadata >/dev/null && echo 'restore_metadata:ok'
@@ -49,7 +49,7 @@ EOF
   [[ "$result" == *"notify_save:ok"* ]]
   [[ "$result" == *"notify_restore:ok"* ]]
   [[ "$result" == *"notify_restore_fail:ok"* ]]
-  [[ "$result" == *"rename_workspace:ok"* ]]
+  [[ "$result" == *"rename_tab:ok"* ]]
   [[ "$result" == *"workspace_label:ok"* ]]
   [[ "$result" == *"capture_session:ok"* ]]
   [[ "$result" == *"restore_metadata:ok"* ]]
@@ -193,23 +193,23 @@ s.listen(1)
   [ "$result" = "empty" ]
 }
 
-@test "cmux_rename_workspace skips when not inside cmux" {
+@test "cmux_rename_tab skips when not inside cmux" {
   result=$(zsh -c "
     unset CMUX_BUNDLE_ID CMUX_SOCKET_PATH
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
-    _tmux_cmux_rename_workspace 'test-name'
+    _tmux_cmux_rename_tab 'test-name'
     echo ok
   ")
   [ "$result" = "ok" ]
 }
 
-@test "cmux_rename_workspace skips empty name" {
+@test "cmux_rename_tab skips empty name" {
   result=$(zsh -c "
     export CMUX_BUNDLE_ID=com.cmuxterm.app
     source '$TMUX_MANAGER_DIR/lib/archive_format.sh'
     source '$TMUX_MANAGER_DIR/plugins/cmux.sh'
-    _tmux_cmux_rename_workspace ''
+    _tmux_cmux_rename_tab ''
     echo ok
   ")
   [ "$result" = "ok" ]
