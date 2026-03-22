@@ -72,7 +72,7 @@ _tmux_cc_detect_sid_from_sessions() {
   [ -d "$sessions_dir" ] || return 1
 
   python3 -c "
-import json, glob, os
+import json, glob, os, sys
 cwd = '''${pane_cwd}'''
 best_sid, best_time = '', 0
 for f in glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'sessions', '*.json')):
@@ -85,7 +85,10 @@ for f in glob.glob(os.path.join(os.path.expanduser('~'), '.claude', 'sessions', 
                     best_time = t
                     best_sid = d.get('sessionId', '')
     except: pass
-if best_sid: print(best_sid)
+if best_sid:
+    print(best_sid)
+else:
+    sys.exit(1)
 " 2>/dev/null || return 1
 }
 
